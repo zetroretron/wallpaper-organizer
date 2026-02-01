@@ -80,13 +80,24 @@ def get_auto_contrast_color(background_image: Image.Image) -> Tuple[tuple, tuple
 
 
 def get_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """Get system font with fallback."""
-    fonts = ["Segoe UI Bold", "Segoe UI", "Arial Bold", "Arial"] if bold else ["Segoe UI", "Arial"]
-    for name in fonts:
+    """Get system font with strict fallback to ensure TrueType scaling."""
+    # Standard Windows font paths
+    search_paths = [
+        r"C:\Windows\Fonts\segoeui.ttf" if not bold else r"C:\Windows\Fonts\segoeuib.ttf",
+        r"C:\Windows\Fonts\arial.ttf" if not bold else r"C:\Windows\Fonts\arialbd.ttf",
+        r"C:\Windows\Fonts\calibri.ttf" if not bold else r"C:\Windows\Fonts\calibrib.ttf",
+        "arial.ttf",
+        "segoeui.ttf"
+    ]
+    
+    for font_path in search_paths:
         try:
-            return ImageFont.truetype(name, size)
-        except:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
             continue
+            
+    # CRITICAL FALLBACK: Warning if we hit this, text will be tiny/pixelated
+    print(f"WARNING: Could not load any TrueType fonts. Text will be tiny. Size requested: {size}")
     return ImageFont.load_default()
 
 
