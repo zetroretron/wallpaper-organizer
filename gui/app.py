@@ -188,20 +188,7 @@ class WallpaperCalendarApp(ctk.CTk):
                                              variable=self.blend_var, command=self._on_blend_change)
         blend_menu.pack(side="right", padx=10, pady=6)
 
-        # Font size slider
-        font_frame = ctk.CTkFrame(controls_frame)
-        font_frame.pack(fill="x", pady=3)
-        
-        ctk.CTkLabel(font_frame, text="🔤 Font Size", font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=6)
-        self.font_scale_label = ctk.CTkLabel(font_frame, text=f"{self.settings.get('font_scale', 100)}%", width=40)
-        self.font_scale_label.pack(side="right", padx=5, pady=6)
-        self.font_scale_slider = ctk.CTkSlider(font_frame, from_=50, to=200, number_of_steps=30,
-                                                command=self._on_font_scale_change, width=100)
 
-        self.font_scale_slider.set(self.settings.get('font_scale', 100))
-        self.font_scale_slider.pack(side="right", padx=5, pady=6)
-
-        
         # Calendar
         self._create_compact_widget_controls(controls_frame, "📅 Calendar", "calendar", show_size="calendar_size_percent")
         
@@ -260,9 +247,24 @@ class WallpaperCalendarApp(ctk.CTk):
                         variable=enabled_var,
                         command=lambda: self._on_widget_toggle(widget_key)).pack(side="left")
         
+        # Font Scale Slider next to title
+        font_scale_key = f"{widget_key}_font_scale"
+        current_font_scale = self.settings.get(font_scale_key, 100)
+        
+        f_frame = ctk.CTkFrame(header, fg_color="transparent")
+        f_frame.pack(side="right")
+        
+        ctk.CTkLabel(f_frame, text="Font:").pack(side="left", padx=(10, 5))
+        f_slider = ctk.CTkSlider(f_frame, from_=50, to=200, width=80, number_of_steps=30,
+                                  command=lambda v, k=font_scale_key: self._on_font_live(k, v))
+        f_slider.set(current_font_scale)
+        f_slider.pack(side="left")
+        setattr(self, f"{widget_key}_font_slider", f_slider)
+
         # X/Y in same row
         pos_frame = ctk.CTkFrame(frame, fg_color="transparent")
         pos_frame.pack(fill="x", padx=10, pady=2)
+
         
         # X
         ctk.CTkLabel(pos_frame, text="X:", width=20).pack(side="left")
@@ -338,6 +340,11 @@ class WallpaperCalendarApp(ctk.CTk):
         self.settings[size_key] = int(value)
         label = getattr(self, f"{widget_key}_size_label")
         label.configure(text=f"{int(value)}%")
+        save_settings(self.settings)
+        self._schedule_preview_update()
+    
+    def _on_font_live(self, settings_key, value):
+        self.settings[settings_key] = int(value)
         save_settings(self.settings)
         self._schedule_preview_update()
     

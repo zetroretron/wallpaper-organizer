@@ -35,7 +35,8 @@ DEFAULT_SETTINGS = {
     "calendar_y_percent": 0,
     "calendar_size_percent": 28,
     "calendar_opacity": 90,
-    "calendar_style": "aesthetic",  # aesthetic, compact, minimal, classic
+    "calendar_style": "aesthetic",
+    "calendar_font_scale": 100,  # New: Individual font scale
     
     # To-Do widget
     "todo_enabled": True,
@@ -44,6 +45,7 @@ DEFAULT_SETTINGS = {
     "todo_width_percent": 22,
     "todo_height_percent": 40,
     "todo_opacity": 85,
+    "todo_font_scale": 100,  # New: Individual font scale
     
     # Notes widget
     "notes_enabled": True,
@@ -52,12 +54,15 @@ DEFAULT_SETTINGS = {
     "notes_width_percent": 22,
     "notes_height_percent": 35,
     "notes_opacity": 85,
+    "notes_font_scale": 100,  # New: Individual font scale
     
     # Clock widget
     "clock_enabled": False,
     "clock_x_percent": 80,
     "clock_y_percent": 5,
     "clock_size_percent": 15,
+    "clock_opacity": 90,
+    "clock_font_scale": 100,  # New: Individual font scale
 }
 
 

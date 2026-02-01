@@ -494,7 +494,7 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
     yp = padding
     today_dt = datetime.now()
     style = settings.get('calendar_style', 'aesthetic')
-    user_scale = settings.get('font_scale', 100) / 100.0  # Convert 50-150% to 0.5-1.5
+    user_scale = settings.get('calendar_font_scale', 100) / 100.0  # Convert 50-150% to 0.5-1.5
     
     draw = ImageDraw.Draw(widget)
     
@@ -621,7 +621,7 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
     draw = ImageDraw.Draw(widget)
     padding = int(height * 0.05)
     yp = padding
-    user_scale = settings.get('font_scale', 100) / 100.0
+    user_scale = settings.get('todo_font_scale', 100) / 100.0
     
     # Header (7% of height)
     header_font = get_dynamic_font_size(height, 0.07, user_scale)
@@ -706,7 +706,7 @@ def render_notes_widget(base_image: Image.Image,
     draw = ImageDraw.Draw(widget)
     padding = int(height * 0.06)
     yp = padding
-    user_scale = settings.get('font_scale', 100) / 100.0
+    user_scale = settings.get('notes_font_scale', 100) / 100.0
     
     # Header (7%)
     header_font = get_dynamic_font_size(height, 0.07, user_scale)
@@ -776,7 +776,7 @@ def render_clock_widget(base_image: Image.Image,
     shadow = colors['shadow']
     
     # Time text (50% of height for clock)
-    user_scale = settings.get('font_scale', 100) / 100.0
+    user_scale = settings.get('clock_font_scale', 100) / 100.0
     time_str = datetime.now().strftime("%H:%M")
     time_font = get_dynamic_font_size(height, 0.50, user_scale)
     
