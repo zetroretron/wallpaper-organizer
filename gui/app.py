@@ -178,6 +178,17 @@ class WallpaperCalendarApp(ctk.CTk):
                                         command=self._on_theme_change, width=120)
         theme_menu.pack(side="right", padx=10, pady=8)
         
+        # Blend mode selector (Glass vs Solid)
+        blend_frame = ctk.CTkFrame(controls_frame)
+        blend_frame.pack(fill="x", pady=3)
+        
+        ctk.CTkLabel(blend_frame, text="🪟 Background", font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=6)
+        self.blend_var = ctk.StringVar(value=self.settings.get('blend_mode', 'glass'))
+        blend_menu = ctk.CTkSegmentedButton(blend_frame, values=["glass", "solid"],
+                                             variable=self.blend_var, command=self._on_blend_change)
+        blend_menu.pack(side="right", padx=10, pady=6)
+
+        
         # Calendar
         self._create_compact_widget_controls(controls_frame, "📅 Calendar", "calendar", show_size="calendar_size_percent")
         
@@ -339,6 +350,12 @@ class WallpaperCalendarApp(ctk.CTk):
         self.settings['calendar_style'] = style
         save_settings(self.settings)
         self._schedule_preview_update()
+    
+    def _on_blend_change(self, mode):
+        self.settings['blend_mode'] = mode
+        save_settings(self.settings)
+        self._schedule_preview_update()
+
     
     def _schedule_preview_update(self):
         """Debounce preview updates to avoid lag"""

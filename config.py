@@ -26,6 +26,7 @@ NOTES_FILE = DATA_DIR / "notes.json"
 DEFAULT_SETTINGS = {
     # Global settings
     "theme": "dark",
+    "blend_mode": "glass",  # "glass" (frosted) or "solid" (opaque)
     
     # Calendar widget
     "calendar_enabled": True,
@@ -33,7 +34,7 @@ DEFAULT_SETTINGS = {
     "calendar_y_percent": 0,
     "calendar_size_percent": 28,
     "calendar_opacity": 90,
-    "calendar_style": "aesthetic",  # aesthetic, minimal, classic
+    "calendar_style": "aesthetic",  # aesthetic, compact, minimal, classic
     
     # To-Do widget
     "todo_enabled": True,
@@ -57,6 +58,7 @@ DEFAULT_SETTINGS = {
     "clock_y_percent": 5,
     "clock_size_percent": 15,
 }
+
 
 # Theme definitions
 THEMES = {
