@@ -1,13 +1,14 @@
 """
-Wallpaper Generator - Multi-Widget System
-Creates aesthetic wallpapers with Calendar, To-Do, and Notes widgets
+Wallpaper Generator - Smart Blending Edition
+Widgets blend naturally with the wallpaper using glassmorphism and adaptive colors.
 """
 from datetime import datetime, timedelta
 import calendar
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
+import numpy as np
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
 from config import (
     THEMES, CATEGORY_COLORS, CALENDAR_STYLES, WALLPAPER_CONFIG, OUTPUT_DIR,
@@ -15,505 +16,654 @@ from config import (
 )
 
 
+# ============================================================================
+# SMART BLENDING: Glassmorphism
+# ============================================================================
+
+def apply_glassmorphism(base_image: Image.Image, region: tuple,
+                        blur_radius: int = 25,
+                        tint_color: tuple = (255, 255, 255),
+                        tint_opacity: float = 0.15,
+                        brightness: float = 1.0,
+                        border_radius: int = 20) -> Image.Image:
+    """
+    Apply frosted glass effect to a region of the image.
+    The widget background becomes a blurred version of what's behind it.
+    """
+    x1, y1, x2, y2 = region
+    w, h = x2 - x1, y2 - y1
+    
+    # Crop the region
+    cropped = base_image.crop(region).convert('RGBA')
+    
+    # Apply strong blur
+    blurred = cropped.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    
+    # Adjust brightness
+    if brightness != 1.0:
+        enhancer = ImageEnhance.Brightness(blurred)
+        blurred = enhancer.enhance(brightness)
+    
+    # Create tint overlay
+    tint_layer = Image.new('RGBA', (w, h), (*tint_color, int(255 * tint_opacity)))
+    
+    # Create rounded mask
+    mask = Image.new('L', (w, h), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([0, 0, w, h], radius=border_radius, fill=255)
+    
+    # Composite: blur + tint
+    glass = Image.alpha_composite(blurred, tint_layer)
+    
+    # Apply rounded corners
+    glass.putalpha(mask)
+    
+    return glass
+
+
+def get_glass_params_for_region(image: Image.Image, region: tuple) -> dict:
+    """
+    Analyze region brightness and return optimal glass parameters.
+    Dark areas get lighter glass, light areas get darker glass.
+    """
+    x1, y1, x2, y2 = region
+    cropped = image.crop(region).convert('L')
+    brightness = np.mean(np.array(cropped)) / 255.0
+    
+    if brightness < 0.3:  # Dark region
+        return {
+            'tint_color': (200, 200, 210),
+            'tint_opacity': 0.12,
+            'brightness': 1.4,
+            'blur_radius': 30,
+            'text_color': (255, 255, 255),
+            'text_shadow': (0, 0, 0)
+        }
+    elif brightness > 0.7:  # Light region
+        return {
+            'tint_color': (20, 20, 30),
+            'tint_opacity': 0.2,
+            'brightness': 0.7,
+            'blur_radius': 25,
+            'text_color': (255, 255, 255),
+            'text_shadow': (0, 0, 0)
+        }
+    else:  # Mid-tone
+        return {
+            'tint_color': (255, 255, 255),
+            'tint_opacity': 0.18,
+            'brightness': 1.1,
+            'blur_radius': 28,
+            'text_color': (255, 255, 255),
+            'text_shadow': (30, 30, 40)
+        }
+
+
+# ============================================================================
+# SMART BLENDING: Adaptive Color Extraction
+# ============================================================================
+
+def extract_dominant_colors(image: Image.Image, n_colors: int = 5) -> List[tuple]:
+    """Extract dominant colors using quantization (no sklearn needed)."""
+    # Resize for speed
+    img_small = image.resize((80, 80)).convert('RGB')
+    
+    # Use PIL's quantization
+    quantized = img_small.quantize(colors=n_colors, method=Image.Quantize.MEDIANCUT)
+    palette = quantized.getpalette()[:n_colors * 3]
+    
+    colors = []
+    for i in range(0, len(palette), 3):
+        colors.append((palette[i], palette[i+1], palette[i+2]))
+    
+    return colors
+
+
+def calculate_luminance(color: tuple) -> float:
+    """Calculate perceived luminance (0-1)."""
+    r, g, b = color[:3]
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+
+
+def get_contrast_color(bg_color: tuple) -> tuple:
+    """Return white or dark gray based on background luminance."""
+    lum = calculate_luminance(bg_color)
+    return (255, 255, 255) if lum < 0.55 else (40, 40, 45)
+
+
+def generate_accent_color(base_color: tuple, shift: float = 0.4) -> tuple:
+    """Generate a vibrant accent color from base color."""
+    import colorsys
+    r, g, b = [x / 255.0 for x in base_color[:3]]
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    
+    # Shift hue and increase saturation
+    h = (h + shift) % 1.0
+    s = min(1.0, s * 1.5 + 0.3)
+    l = max(0.4, min(0.65, l))
+    
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def get_adaptive_colors(image: Image.Image, region: tuple) -> dict:
+    """
+    Analyze wallpaper region and return optimal colors for text/accents.
+    """
+    cropped = image.crop(region)
+    palette = extract_dominant_colors(cropped, n_colors=4)
+    
+    if not palette:
+        return {
+            'text': (255, 255, 255),
+            'text_secondary': (180, 180, 190),
+            'accent': (100, 180, 255),
+            'today': (255, 120, 100)
+        }
+    
+    dominant = palette[0]
+    secondary = palette[1] if len(palette) > 1 else dominant
+    
+    # Calculate luminance of region
+    cropped_l = cropped.convert('L')
+    avg_brightness = np.mean(np.array(cropped_l)) / 255.0
+    
+    # Text colors based on brightness
+    if avg_brightness < 0.45:
+        text = (255, 255, 255)
+        text_secondary = (200, 200, 210)
+    else:
+        text = (30, 30, 35)
+        text_secondary = (80, 80, 90)
+    
+    # Accent colors - vibrant and complementary
+    accent = generate_accent_color(secondary, shift=0.5)
+    today = generate_accent_color(dominant, shift=0.33)
+    
+    return {
+        'text': text,
+        'text_secondary': text_secondary,
+        'accent': accent,
+        'today': today,
+        'dominant': dominant,
+        'brightness': avg_brightness
+    }
+
+
+# ============================================================================
+# SMART BLENDING: Region Analysis (Noise Detection)
+# ============================================================================
+
+def analyze_region_noise(image: Image.Image, region: tuple) -> dict:
+    """
+    Check if a region is too "noisy" for readable text.
+    Returns score 0-100 and recommendation.
+    """
+    cropped = image.crop(region).convert('L')
+    
+    # Edge detection
+    edges = cropped.filter(ImageFilter.FIND_EDGES)
+    edge_density = np.mean(np.array(edges)) / 255.0
+    
+    # Variance (texture complexity)
+    variance = np.var(np.array(cropped)) / (255 ** 2)
+    
+    # Combined score
+    score = int(min(100, edge_density * 50 + variance * 150))
+    
+    if score < 30:
+        recommendation = "excellent"
+    elif score < 50:
+        recommendation = "good"
+    elif score < 70:
+        recommendation = "warning"
+    else:
+        recommendation = "bad"
+    
+    return {'score': score, 'recommendation': recommendation}
+
+
+# ============================================================================
+# FONT UTILITIES
+# ============================================================================
+
 def get_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """Get font with fallback"""
-    font_names = [
-        "Segoe UI Bold" if bold else "Segoe UI",
-        "Arial Bold" if bold else "Arial",
-        "Calibri Bold" if bold else "Calibri",
-    ]
+    """Get system font with fallback."""
+    fonts = ["Segoe UI Bold", "Segoe UI", "Arial Bold", "Arial", "Calibri"]
+    if not bold:
+        fonts = ["Segoe UI", "Segoe UI Light", "Arial", "Calibri"]
     
-    for font_name in font_names:
+    for name in fonts:
         try:
-            return ImageFont.truetype(font_name, size)
-        except (OSError, IOError):
+            return ImageFont.truetype(name, size)
+        except:
             continue
-    
     return ImageFont.load_default()
 
 
-def get_script_font(size: int) -> ImageFont.FreeTypeFont:
-    """Get decorative/script font for headers"""
-    font_names = ["Georgia", "Times New Roman", "Palatino Linotype", "Segoe UI"]
-    
-    for font_name in font_names:
-        try:
-            return ImageFont.truetype(font_name, size)
-        except:
-            continue
-    
-    return get_font(size, bold=True)
-
-
-def analyze_region_brightness(image: Image.Image, region: Tuple[int, int, int, int]) -> float:
-    """Analyze average brightness of image region"""
-    try:
-        x1, y1, x2, y2 = region
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(image.width, x2), min(image.height, y2)
-        
-        cropped = image.crop((x1, y1, x2, y2))
-        gray = cropped.convert('L')
-        pixels = list(gray.getdata())
-        return sum(pixels) / len(pixels) if pixels else 128
-    except:
-        return 128
-
-
-def draw_text_shadow(draw, pos, text, font, fill, shadow_color=(0,0,0,150), 
-                     anchor="lt", offset=2):
-    """Draw text with shadow for visibility"""
+def draw_text_shadow(draw, pos, text, font, fill, shadow_color=(0,0,0,100), offset=2):
+    """Draw text with shadow for readability."""
     x, y = pos
-    # Draw shadow
-    for dx, dy in [(-offset, -offset), (offset, -offset), (-offset, offset), (offset, offset),
-                   (0, -offset), (0, offset), (-offset, 0), (offset, 0)]:
-        draw.text((x + dx, y + dy), text, font=font, fill=shadow_color, anchor=anchor)
-    # Draw main text
-    draw.text(pos, text, font=font, fill=fill, anchor=anchor)
+    # Shadow
+    for dx, dy in [(-offset, 0), (offset, 0), (0, -offset), (0, offset),
+                   (-offset, -offset), (offset, offset)]:
+        draw.text((x + dx, y + dy), text, font=font, fill=shadow_color)
+    # Main text
+    draw.text(pos, text, font=font, fill=fill)
 
 
-def render_calendar_widget(tasks: List[Dict], width: int, height: int, 
-                           settings: dict, theme: dict) -> Image.Image:
+# ============================================================================
+# WIDGET RENDERERS WITH SMART BLENDING
+# ============================================================================
+
+def render_calendar_widget(base_image: Image.Image, tasks: List[Dict], 
+                           x: int, y: int, width: int, height: int,
+                           settings: dict) -> Tuple[Image.Image, tuple]:
     """
-    Render aesthetic calendar widget inspired by the reference images
+    Render calendar widget with glassmorphism background.
+    Returns (widget_image, position).
     """
-    style = CALENDAR_STYLES.get(settings.get("calendar_style", "aesthetic"), CALENDAR_STYLES["aesthetic"])
-    opacity = int(settings.get("calendar_opacity", 90) * 255 / 100)
+    region = (x, y, x + width, y + height)
     
-    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    # Get adaptive parameters
+    glass_params = get_glass_params_for_region(base_image, region)
+    colors = get_adaptive_colors(base_image, region)
     
-    # Colors with opacity
-    bg_r, bg_g, bg_b = theme["bg_color"]
-    bg_color = (bg_r, bg_g, bg_b, opacity)
-    text_color = (*theme["text_color"], 255)
-    text_secondary = (*theme["text_secondary"], 255)
-    today_color = (*theme["today_color"], 255)
-    weekend_color = (*theme["weekend_color"], 255)
-    border_color = (*theme.get("border_color", theme["header_color"]), 100)
-    
-    # Draw background
-    radius = style["rounded_corners"]
-    padding = 15
-    draw.rounded_rectangle(
-        [padding, padding, width - padding, height - padding],
-        radius=radius,
-        fill=bg_color,
-        outline=border_color,
-        width=2
+    # Create glass background
+    glass_bg = apply_glassmorphism(
+        base_image, region,
+        blur_radius=glass_params['blur_radius'],
+        tint_color=glass_params['tint_color'],
+        tint_opacity=glass_params['tint_opacity'],
+        brightness=glass_params['brightness'],
+        border_radius=18
     )
     
-    # Current date info
+    # Draw on glass
+    draw = ImageDraw.Draw(glass_bg)
+    
+    # Colors
+    text_color = (*colors['text'], 255)
+    text_secondary = (*colors['text_secondary'], 255)
+    accent_color = (*colors['accent'], 255)
+    today_color = (*colors['today'], 255)
+    
+    # Sizing
+    base = max(width // 15, 13)
+    padding = 20
+    
     today = datetime.now()
-    current_year = today.year
-    current_month = today.month
-    current_day = today.day
-    month_name = calendar.month_name[current_month]
+    month_name = calendar.month_name[today.month]
     
-    # Font sizes based on widget size
-    base = max(width // 16, 12)
+    # Style check
+    style = CALENDAR_STYLES.get(settings.get('calendar_style', 'aesthetic'), 
+                                 CALENDAR_STYLES['aesthetic'])
     
-    y_offset = padding + 20
+    y_pos = padding + 5
     
-    # AESTHETIC STYLE: Large date number + month name
-    if style["show_large_date"]:
-        # Large day number
-        large_font = get_font(int(base * 4), bold=True)
-        day_str = f"{current_day:02d}"
-        draw.text((padding + 25, y_offset), day_str, font=large_font, fill=text_color)
+    # Large date display (aesthetic style)
+    if style.get('show_large_date', True):
+        large_font = get_font(int(base * 3.5), bold=True)
+        day_str = f"{today.day:02d}"
+        draw_text_shadow(draw, (padding + 10, y_pos), day_str, large_font, text_color)
         
-        # Month and year to the right
-        month_font = get_script_font(int(base * 1.2))
-        draw.text((padding + 25 + base * 5, y_offset + 10), month_name, 
+        # Month/year
+        month_font = get_font(int(base * 1.1), bold=False)
+        draw.text((padding + 10 + base * 4.5, y_pos + 8), month_name, 
                   font=month_font, fill=text_secondary)
-        draw.text((padding + 25 + base * 5, y_offset + 10 + base * 1.5), str(current_year),
-                  font=get_font(int(base * 1.0), bold=False), fill=text_secondary)
+        draw.text((padding + 10 + base * 4.5, y_pos + base * 1.5), str(today.year),
+                  font=get_font(int(base * 0.9), bold=False), fill=text_secondary)
         
-        y_offset += int(base * 4.5)
+        y_pos += int(base * 4)
     else:
         # Simple header
-        header_font = get_font(int(base * 1.4), bold=True)
-        draw.text((width // 2, y_offset), f"{month_name} {current_year}",
+        header_font = get_font(int(base * 1.3), bold=True)
+        draw.text((width // 2, y_pos), f"{month_name} {today.year}",
                   font=header_font, fill=text_color, anchor="mt")
-        y_offset += int(base * 2.2)
+        y_pos += int(base * 2)
     
-    # Divider line
-    draw.line([(padding + 20, y_offset), (width - padding - 20, y_offset)],
-              fill=border_color, width=1)
-    y_offset += 15
+    # Divider
+    draw.line([(padding, y_pos), (width - padding, y_pos)], 
+              fill=(*text_secondary[:3], 80), width=1)
+    y_pos += 12
     
     # Weekday headers
-    if style["weekday_format"] == "full":
-        weekdays = ["S", "M", "T", "W", "T", "F", "S"]
-    elif style["weekday_format"] == "short":
-        weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    else:
-        weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+    weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+    cell_w = (width - padding * 2) // 7
+    weekday_font = get_font(int(base * 0.8), bold=True)
     
-    cell_width = (width - padding * 4) // 7
-    start_x = padding * 2
+    for i, wd in enumerate(weekdays):
+        wx = padding + i * cell_w + cell_w // 2
+        color = accent_color if i == 0 else text_secondary
+        draw.text((wx, y_pos), wd, font=weekday_font, fill=color, anchor="mt")
     
-    weekday_font = get_font(int(base * 0.85), bold=True)
-    for i, day in enumerate(weekdays):
-        x = start_x + i * cell_width + cell_width // 2
-        color = weekend_color if i in [0, 6] else text_secondary
-        draw.text((x, y_offset), day, font=weekday_font, fill=color, anchor="mt")
+    y_pos += int(base * 1.6)
     
-    y_offset += int(base * 1.8)
+    # Calendar grid
+    cal = calendar.Calendar(firstweekday=6)
+    month_days = cal.monthdayscalendar(today.year, today.month)
     
-    # Calendar grid (Sunday start like in the examples)
-    cal = calendar.Calendar(firstweekday=6)  # Sunday first
-    month_days = cal.monthdayscalendar(current_year, current_month)
-    
-    # Create tasks lookup
+    # Tasks lookup
     tasks_by_date = {}
     for task in tasks:
-        date_str = task.get("date", "")
-        if date_str not in tasks_by_date:
-            tasks_by_date[date_str] = []
-        tasks_by_date[date_str].append(task)
+        d = task.get("date", "")
+        if d not in tasks_by_date:
+            tasks_by_date[d] = []
+        tasks_by_date[d].append(task)
     
-    cell_height = int(base * 1.9)
-    day_font = get_font(int(base * 1.0), bold=False)
+    cell_h = int(base * 1.7)
+    day_font = get_font(int(base * 0.9), bold=False)
     
-    for week_idx, week in enumerate(month_days[:6]):
-        y = y_offset + week_idx * cell_height
-        
+    for week in month_days[:6]:
         for day_idx, day in enumerate(week):
             if day == 0:
                 continue
             
-            x = start_x + day_idx * cell_width + cell_width // 2
-            date_str = f"{current_year}-{current_month:02d}-{day:02d}"
+            cx = padding + day_idx * cell_w + cell_w // 2
+            date_str = f"{today.year}-{today.month:02d}-{day:02d}"
             day_tasks = tasks_by_date.get(date_str, [])
             
-            # Today circle
-            if day == current_day:
-                r = int(base * 0.9)
-                draw.ellipse([x - r, y - r + 5, x + r, y + r + 5], fill=today_color)
-                day_text_color = (255, 255, 255, 255) if sum(theme["today_color"]) < 450 else (0, 0, 0, 255)
-            elif day_idx in [0, 6]:
-                day_text_color = today_color  # Sundays/Saturdays highlighted
+            # Today highlight
+            if day == today.day:
+                r = int(base * 0.85)
+                draw.ellipse([cx - r, y_pos - r + 4, cx + r, y_pos + r + 4], fill=today_color)
+                day_text_color = (255, 255, 255, 255)
+            elif day_idx == 0:
+                day_text_color = accent_color
             else:
                 day_text_color = text_color
             
-            draw.text((x, y + 5), str(day), font=day_font, fill=day_text_color, anchor="mt")
+            draw.text((cx, y_pos + 4), str(day), font=day_font, fill=day_text_color, anchor="mt")
             
             # Task dots
-            if day_tasks and day != current_day:
-                dot_y = y + int(base * 1.2)
-                for i, task in enumerate(day_tasks[:2]):
+            if day_tasks and day != today.day:
+                dot_y = y_pos + int(base * 1.1)
+                for j, task in enumerate(day_tasks[:2]):
                     cat = task.get("category", "default")
-                    dot_color = (*CATEGORY_COLORS.get(cat, CATEGORY_COLORS["default"]), 255)
-                    dot_x = x - 4 + i * 8
-                    draw.ellipse([dot_x - 2, dot_y - 2, dot_x + 2, dot_y + 2], fill=dot_color)
+                    dot_color = (*CATEGORY_COLORS.get(cat, (150, 150, 150)), 255)
+                    dot_x = cx - 3 + j * 7
+                    draw.ellipse([dot_x - 2, dot_y, dot_x + 2, dot_y + 4], fill=dot_color)
+        
+        y_pos += cell_h
     
-    return img
+    return glass_bg, (x, y)
 
 
-def render_todo_widget(tasks: List[Dict], width: int, height: int,
-                       settings: dict, theme: dict) -> Image.Image:
-    """Render To-Do List widget"""
-    opacity = int(settings.get("todo_opacity", 85) * 255 / 100)
+def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
+                       x: int, y: int, width: int, height: int,
+                       settings: dict) -> Tuple[Image.Image, tuple]:
+    """Render To-Do widget with glass effect."""
+    region = (x, y, x + width, y + height)
     
-    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    glass_params = get_glass_params_for_region(base_image, region)
+    colors = get_adaptive_colors(base_image, region)
     
-    bg_r, bg_g, bg_b = theme["bg_color"]
-    bg_color = (bg_r, bg_g, bg_b, opacity)
-    text_color = (*theme["text_color"], 255)
-    text_secondary = (*theme["text_secondary"], 255)
-    border_color = (*theme.get("border_color", theme["header_color"]), 100)
-    
-    padding = 12
-    draw.rounded_rectangle(
-        [padding, padding, width - padding, height - padding],
-        radius=15,
-        fill=bg_color,
-        outline=border_color,
-        width=2
+    glass_bg = apply_glassmorphism(
+        base_image, region,
+        blur_radius=glass_params['blur_radius'],
+        tint_color=glass_params['tint_color'],
+        tint_opacity=glass_params['tint_opacity'],
+        brightness=glass_params['brightness'],
+        border_radius=15
     )
     
-    # Header
-    base = max(width // 14, 11)
-    header_font = get_font(int(base * 1.2), bold=True)
-    y = padding + 18
+    draw = ImageDraw.Draw(glass_bg)
     
-    draw.text((padding + 20, y), "To Do List", font=header_font, fill=text_color)
-    y += int(base * 2.2)
+    text_color = (*colors['text'], 255)
+    text_secondary = (*colors['text_secondary'], 255)
+    
+    base = max(width // 14, 11)
+    padding = 15
+    yp = padding + 5
+    
+    # Header
+    header_font = get_font(int(base * 1.1), bold=True)
+    draw_text_shadow(draw, (padding + 5, yp), "To Do", header_font, text_color)
+    yp += int(base * 2)
     
     # Divider
-    draw.line([(padding + 15, y), (width - padding - 15, y)], fill=border_color, width=1)
-    y += 12
+    draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
+    yp += 10
     
-    # Tasks (upcoming 7 days)
+    # Tasks
     today = datetime.now().date()
     upcoming = []
     for task in tasks:
         try:
             task_date = datetime.strptime(task["date"], "%Y-%m-%d").date()
             delta = (task_date - today).days
-            if -1 <= delta <= 7:  # Include today and next 7 days
+            if -1 <= delta <= 7:
                 upcoming.append((delta, task))
         except:
             continue
     
-    upcoming.sort(key=lambda x: (x[0], x[1].get("title", "")))
+    upcoming.sort(key=lambda x: x[0])
     
-    task_font = get_font(int(base * 0.9), bold=False)
-    small_font = get_font(int(base * 0.7), bold=False)
-    line_height = int(base * 1.6)
-    max_tasks = (height - y - padding - 20) // line_height
+    task_font = get_font(int(base * 0.85), bold=False)
+    line_h = int(base * 1.5)
+    max_tasks = (height - yp - padding) // line_h
     
-    for i, (delta, task) in enumerate(upcoming[:max_tasks]):
-        if y > height - padding - 20:
+    for delta, task in upcoming[:max_tasks]:
+        if yp > height - padding - 15:
             break
         
         # Category dot
         cat = task.get("category", "default")
-        cat_color = (*CATEGORY_COLORS.get(cat, CATEGORY_COLORS["default"]), 255)
-        draw.ellipse([padding + 20, y + 5, padding + 28, y + 13], fill=cat_color)
+        cat_color = (*CATEGORY_COLORS.get(cat, (150, 150, 150)), 255)
+        draw.ellipse([padding + 5, yp + 4, padding + 13, yp + 12], fill=cat_color)
         
-        # Checkbox (empty square)
-        draw.rectangle([padding + 35, y + 3, padding + 47, y + 15], 
-                      outline=text_secondary, width=1)
+        # Checkbox
+        draw.rectangle([padding + 20, yp + 2, padding + 32, yp + 14],
+                       outline=text_secondary, width=1)
         
-        # Task text
+        # Title
         title = task.get("title", "")
-        max_chars = (width - padding * 2 - 60) // int(base * 0.5)
+        max_chars = (width - 60) // int(base * 0.5)
         if len(title) > max_chars:
             title = title[:max_chars - 2] + ".."
         
-        draw.text((padding + 55, y), title, font=task_font, fill=text_color)
-        
-        y += line_height
+        draw.text((padding + 40, yp), title, font=task_font, fill=text_color)
+        yp += line_h
     
     if not upcoming:
-        draw.text((padding + 20, y), "No tasks", font=task_font, fill=text_secondary)
+        draw.text((padding, yp), "No tasks", font=task_font, fill=text_secondary)
     
-    return img
+    return glass_bg, (x, y)
 
 
-def render_notes_widget(width: int, height: int, settings: dict, theme: dict) -> Image.Image:
-    """Render Notes widget"""
-    opacity = int(settings.get("notes_opacity", 85) * 255 / 100)
+def render_notes_widget(base_image: Image.Image, 
+                        x: int, y: int, width: int, height: int,
+                        settings: dict) -> Tuple[Image.Image, tuple]:
+    """Render Notes widget with glass effect."""
+    region = (x, y, x + width, y + height)
     notes_text = load_notes()
     
-    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    glass_params = get_glass_params_for_region(base_image, region)
+    colors = get_adaptive_colors(base_image, region)
     
-    bg_r, bg_g, bg_b = theme["bg_color"]
-    bg_color = (bg_r, bg_g, bg_b, opacity)
-    text_color = (*theme["text_color"], 255)
-    text_secondary = (*theme["text_secondary"], 255)
-    border_color = (*theme.get("border_color", theme["header_color"]), 100)
-    
-    padding = 12
-    draw.rounded_rectangle(
-        [padding, padding, width - padding, height - padding],
-        radius=15,
-        fill=bg_color,
-        outline=border_color,
-        width=2
+    glass_bg = apply_glassmorphism(
+        base_image, region,
+        blur_radius=glass_params['blur_radius'],
+        tint_color=glass_params['tint_color'],
+        tint_opacity=glass_params['tint_opacity'],
+        brightness=glass_params['brightness'],
+        border_radius=15
     )
+    
+    draw = ImageDraw.Draw(glass_bg)
+    
+    text_color = (*colors['text'], 255)
+    text_secondary = (*colors['text_secondary'], 255)
+    
+    base = max(width // 14, 11)
+    padding = 15
+    yp = padding + 5
     
     # Header
-    base = max(width // 14, 11)
-    header_font = get_font(int(base * 1.2), bold=True)
-    y = padding + 18
-    
-    draw.text((padding + 20, y), "Notes", font=header_font, fill=text_color)
-    y += int(base * 2.2)
+    header_font = get_font(int(base * 1.1), bold=True)
+    draw_text_shadow(draw, (padding + 5, yp), "Notes", header_font, text_color)
+    yp += int(base * 2)
     
     # Divider
-    draw.line([(padding + 15, y), (width - padding - 15, y)], fill=border_color, width=1)
-    y += 15
+    draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
+    yp += 12
     
     # Notes content
+    notes_font = get_font(int(base * 0.8), bold=False)
+    
     if notes_text:
-        notes_font = get_font(int(base * 0.85), bold=False)
         # Word wrap
         lines = []
-        max_width = width - padding * 2 - 30
+        max_w = width - padding * 2 - 10
         
-        for paragraph in notes_text.split('\n'):
-            words = paragraph.split()
-            current_line = ""
+        for para in notes_text.split('\n'):
+            words = para.split()
+            line = ""
             for word in words:
-                test_line = current_line + " " + word if current_line else word
-                bbox = draw.textbbox((0, 0), test_line, font=notes_font)
-                if bbox[2] - bbox[0] <= max_width:
-                    current_line = test_line
+                test = line + " " + word if line else word
+                bbox = draw.textbbox((0, 0), test, font=notes_font)
+                if bbox[2] - bbox[0] <= max_w:
+                    line = test
                 else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
-            if current_line:
-                lines.append(current_line)
-            if not paragraph:
+                    if line:
+                        lines.append(line)
+                    line = word
+            if line:
+                lines.append(line)
+            if not para:
                 lines.append("")
         
-        line_height = int(base * 1.4)
-        max_lines = (height - y - padding - 10) // line_height
+        line_h = int(base * 1.3)
+        max_lines = (height - yp - padding) // line_h
         
         for line in lines[:max_lines]:
-            draw.text((padding + 20, y), line, font=notes_font, fill=text_color)
-            y += line_height
+            draw.text((padding + 5, yp), line, font=notes_font, fill=text_color)
+            yp += line_h
     else:
-        draw.text((padding + 20, y), "Add notes in the app...", 
-                  font=get_font(int(base * 0.85), bold=False), fill=text_secondary)
+        draw.text((padding + 5, yp), "Add notes in app...", font=notes_font, fill=text_secondary)
     
-    return img
+    return glass_bg, (x, y)
 
 
-def render_clock_widget(width: int, height: int, settings: dict, theme: dict) -> Image.Image:
-    """Render Clock widget"""
-    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+def render_clock_widget(base_image: Image.Image,
+                        x: int, y: int, width: int, height: int,
+                        settings: dict) -> Tuple[Image.Image, tuple]:
+    """Render Clock widget with glass effect."""
+    region = (x, y, x + width, y + height)
     
-    bg_r, bg_g, bg_b = theme["bg_color"]
-    opacity = 200
-    bg_color = (bg_r, bg_g, bg_b, opacity)
-    text_color = (*theme["text_color"], 255)
-    border_color = (*theme.get("border_color", theme["header_color"]), 100)
+    glass_params = get_glass_params_for_region(base_image, region)
+    colors = get_adaptive_colors(base_image, region)
     
-    padding = 10
-    draw.rounded_rectangle(
-        [padding, padding, width - padding, height - padding],
-        radius=15,
-        fill=bg_color,
-        outline=border_color,
-        width=2
+    glass_bg = apply_glassmorphism(
+        base_image, region,
+        blur_radius=glass_params['blur_radius'],
+        tint_color=glass_params['tint_color'],
+        tint_opacity=glass_params['tint_opacity'],
+        brightness=glass_params['brightness'],
+        border_radius=15
     )
     
+    draw = ImageDraw.Draw(glass_bg)
+    text_color = (*colors['text'], 255)
+    
     # Time
-    now = datetime.now()
-    time_str = now.strftime("%H:%M")
-    
+    time_str = datetime.now().strftime("%H:%M")
     base = max(width // 6, 20)
-    time_font = get_font(int(base * 2), bold=True)
+    time_font = get_font(int(base * 1.8), bold=True)
     
-    draw.text((width // 2, height // 2), time_str, font=time_font, 
-              fill=text_color, anchor="mm")
+    draw_text_shadow(draw, (width // 2, height // 2), time_str, time_font, text_color)
     
-    return img
+    return glass_bg, (x, y)
 
 
-def get_widget_position(base_size: Tuple[int, int], widget_size: Tuple[int, int],
+# ============================================================================
+# MAIN GENERATOR
+# ============================================================================
+
+def get_widget_position(base_size: tuple, widget_size: tuple,
                         x_percent: int, y_percent: int) -> Tuple[int, int]:
-    """Calculate widget position from percentages"""
+    """Calculate widget position from percentages."""
     base_w, base_h = base_size
     w_w, w_h = widget_size
     
-    # Position is the percentage of available space (not total)
-    available_x = base_w - w_w
-    available_y = base_h - w_h
+    x = int((base_w - w_w) * x_percent / 100)
+    y = int((base_h - w_h) * y_percent / 100)
     
-    x = int(available_x * x_percent / 100)
-    y = int(available_y * y_percent / 100)
-    
-    # Clamp to bounds with padding
-    padding = 20
+    padding = 25
     x = max(padding, min(x, base_w - w_w - padding))
     y = max(padding, min(y, base_h - w_h - padding))
     
     return (x, y)
 
 
-def generate_wallpaper(base_image_path: str, tasks: List[Dict], settings: dict = None) -> Optional[str]:
+def generate_wallpaper(base_image_path: str, tasks: List[Dict], 
+                       settings: dict = None) -> Optional[str]:
     """
-    Generate wallpaper with multiple widgets
+    Generate wallpaper with smart-blending widgets.
     """
     if settings is None:
         settings = load_settings()
     
     try:
-        # Load base image
         base_img = Image.open(base_image_path).convert('RGBA')
-        base_width, base_height = base_img.size
-        theme = get_theme(settings.get("theme", "dark"))
-        
+        base_w, base_h = base_img.size
         result = base_img.copy()
         
         # Calendar Widget
         if settings.get("calendar_enabled", True):
             size_pct = settings.get("calendar_size_percent", 28)
-            cal_width = int(base_width * size_pct / 100)
-            cal_height = int(cal_width * 1.1)
-            
-            # Limit size
-            cal_width = max(250, min(cal_width, 500))
-            cal_height = max(280, min(cal_height, 550))
+            cal_w = int(base_w * size_pct / 100)
+            cal_h = int(cal_w * 1.1)
+            cal_w = max(260, min(cal_w, 480))
+            cal_h = max(290, min(cal_h, 530))
             
             x_pct = settings.get("calendar_x_percent", 0)
             y_pct = settings.get("calendar_y_percent", 0)
+            x, y = get_widget_position((base_w, base_h), (cal_w, cal_h), x_pct, y_pct)
             
-            # Check if blur needed
-            pos = get_widget_position((base_width, base_height), (cal_width, cal_height), x_pct, y_pct)
-            if theme.get("blur"):
-                region = result.crop((pos[0], pos[1], pos[0] + cal_width, pos[1] + cal_height))
-                region = region.filter(ImageFilter.GaussianBlur(20))
-                result.paste(region, pos)
-            
-            cal_widget = render_calendar_widget(tasks, cal_width, cal_height, settings, theme)
-            result.paste(cal_widget, pos, cal_widget)
+            widget, pos = render_calendar_widget(result, tasks, x, y, cal_w, cal_h, settings)
+            result.paste(widget, pos, widget)
         
         # To-Do Widget
         if settings.get("todo_enabled", True):
             w_pct = settings.get("todo_width_percent", 22)
             h_pct = settings.get("todo_height_percent", 40)
-            todo_width = int(base_width * w_pct / 100)
-            todo_height = int(base_height * h_pct / 100)
-            
-            todo_width = max(180, min(todo_width, 400))
-            todo_height = max(200, min(todo_height, 500))
+            todo_w = max(180, min(int(base_w * w_pct / 100), 380))
+            todo_h = max(200, min(int(base_h * h_pct / 100), 480))
             
             x_pct = settings.get("todo_x_percent", 0)
             y_pct = settings.get("todo_y_percent", 55)
+            x, y = get_widget_position((base_w, base_h), (todo_w, todo_h), x_pct, y_pct)
             
-            pos = get_widget_position((base_width, base_height), (todo_width, todo_height), x_pct, y_pct)
-            if theme.get("blur"):
-                region = result.crop((pos[0], pos[1], pos[0] + todo_width, pos[1] + todo_height))
-                region = region.filter(ImageFilter.GaussianBlur(20))
-                result.paste(region, pos)
-            
-            todo_widget = render_todo_widget(tasks, todo_width, todo_height, settings, theme)
-            result.paste(todo_widget, pos, todo_widget)
+            widget, pos = render_todo_widget(result, tasks, x, y, todo_w, todo_h, settings)
+            result.paste(widget, pos, widget)
         
         # Notes Widget
         if settings.get("notes_enabled", True):
             w_pct = settings.get("notes_width_percent", 22)
             h_pct = settings.get("notes_height_percent", 35)
-            notes_width = int(base_width * w_pct / 100)
-            notes_height = int(base_height * h_pct / 100)
-            
-            notes_width = max(180, min(notes_width, 400))
-            notes_height = max(150, min(notes_height, 400))
+            notes_w = max(180, min(int(base_w * w_pct / 100), 380))
+            notes_h = max(150, min(int(base_h * h_pct / 100), 380))
             
             x_pct = settings.get("notes_x_percent", 75)
             y_pct = settings.get("notes_y_percent", 60)
+            x, y = get_widget_position((base_w, base_h), (notes_w, notes_h), x_pct, y_pct)
             
-            pos = get_widget_position((base_width, base_height), (notes_width, notes_height), x_pct, y_pct)
-            if theme.get("blur"):
-                region = result.crop((pos[0], pos[1], pos[0] + notes_width, pos[1] + notes_height))
-                region = region.filter(ImageFilter.GaussianBlur(20))
-                result.paste(region, pos)
-            
-            notes_widget = render_notes_widget(notes_width, notes_height, settings, theme)
-            result.paste(notes_widget, pos, notes_widget)
+            widget, pos = render_notes_widget(result, x, y, notes_w, notes_h, settings)
+            result.paste(widget, pos, widget)
         
         # Clock Widget
         if settings.get("clock_enabled", False):
             size_pct = settings.get("clock_size_percent", 15)
-            clock_width = int(base_width * size_pct / 100)
-            clock_height = int(clock_width * 0.5)
+            clock_w = max(120, min(int(base_w * size_pct / 100), 300))
+            clock_h = int(clock_w * 0.5)
             
             x_pct = settings.get("clock_x_percent", 80)
             y_pct = settings.get("clock_y_percent", 5)
+            x, y = get_widget_position((base_w, base_h), (clock_w, clock_h), x_pct, y_pct)
             
-            pos = get_widget_position((base_width, base_height), (clock_width, clock_height), x_pct, y_pct)
-            clock_widget = render_clock_widget(clock_width, clock_height, settings, theme)
-            result.paste(clock_widget, pos, clock_widget)
+            widget, pos = render_clock_widget(result, x, y, clock_w, clock_h, settings)
+            result.paste(widget, pos, widget)
         
         # Save
         output_path = OUTPUT_DIR / WALLPAPER_CONFIG["output_filename"]
