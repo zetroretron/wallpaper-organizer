@@ -188,6 +188,18 @@ class WallpaperCalendarApp(ctk.CTk):
                                              variable=self.blend_var, command=self._on_blend_change)
         blend_menu.pack(side="right", padx=10, pady=6)
 
+        # Font size slider
+        font_frame = ctk.CTkFrame(controls_frame)
+        font_frame.pack(fill="x", pady=3)
+        
+        ctk.CTkLabel(font_frame, text="🔤 Font Size", font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=6)
+        self.font_scale_label = ctk.CTkLabel(font_frame, text=f"{self.settings.get('font_scale', 100)}%", width=40)
+        self.font_scale_label.pack(side="right", padx=5, pady=6)
+        self.font_scale_slider = ctk.CTkSlider(font_frame, from_=50, to=150, number_of_steps=20,
+                                                command=self._on_font_scale_change, width=100)
+        self.font_scale_slider.set(self.settings.get('font_scale', 100))
+        self.font_scale_slider.pack(side="right", padx=5, pady=6)
+
         
         # Calendar
         self._create_compact_widget_controls(controls_frame, "📅 Calendar", "calendar", show_size="calendar_size_percent")
@@ -353,6 +365,12 @@ class WallpaperCalendarApp(ctk.CTk):
     
     def _on_blend_change(self, mode):
         self.settings['blend_mode'] = mode
+        save_settings(self.settings)
+        self._schedule_preview_update()
+
+    def _on_font_scale_change(self, value):
+        self.settings['font_scale'] = int(value)
+        self.font_scale_label.configure(text=f"{int(value)}%")
         save_settings(self.settings)
         self._schedule_preview_update()
 

@@ -464,21 +464,23 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
     yp = padding
     today_dt = datetime.now()
     style = settings.get('calendar_style', 'aesthetic')
+    user_scale = settings.get('font_scale', 100) / 100.0  # Convert 50-150% to 0.5-1.5
     
     draw = ImageDraw.Draw(widget)
     
     # === LARGE DATE (aesthetic mode) ===
     if style not in ['compact', 'minimal']:
         # Large date = 25% of widget height
-        large_font = get_dynamic_font_size(height, 0.25)
+        large_font = get_dynamic_font_size(height, 0.25, user_scale)
         day_str = f"{today_dt.day:02d}"
         
         text_img = render_smooth_text(day_str, large_font, text_color, bold=True, shadow_color=shadow)
+
         widget.paste(text_img, (padding + 5, yp), text_img)
         
         # Month/year next to large date (7% and 6%)
-        month_font = get_dynamic_font_size(height, 0.07)
-        year_font = get_dynamic_font_size(height, 0.06)
+        month_font = get_dynamic_font_size(height, 0.07, user_scale)
+        year_font = get_dynamic_font_size(height, 0.06, user_scale)
         mx = padding + int(large_font * 1.4)
         
         month_img = render_smooth_text(calendar.month_name[today_dt.month], month_font, text_secondary, bold=False)
@@ -490,7 +492,7 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
         yp += int(large_font * 1.15)
     else:
         # Compact header (6% of height)
-        header_font = get_dynamic_font_size(height, 0.06)
+        header_font = get_dynamic_font_size(height, 0.06, user_scale)
         header_text = f"{calendar.month_abbr[today_dt.month]} {today_dt.day}, {today_dt.year}"
         
         text_img = render_smooth_text(header_text, header_font, text_color, bold=True, shadow_color=shadow)
@@ -503,7 +505,7 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
     
     # === WEEKDAYS (4.5% of height) ===
     cell_w = (width - padding * 2) // 7
-    wd_font = get_dynamic_font_size(height, 0.045)
+    wd_font = get_dynamic_font_size(height, 0.045, user_scale)
     weekdays = ["S", "M", "T", "W", "T", "F", "S"]
     
     for i, wd in enumerate(weekdays):
@@ -525,7 +527,7 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
             tasks_by_date[d] = []
         tasks_by_date[d].append(t)
     
-    day_font = get_dynamic_font_size(height, 0.05)
+    day_font = get_dynamic_font_size(height, 0.05, user_scale)
     cell_h = int(height * 0.08)
     max_weeks = 5 if style in ['compact', 'minimal'] else 6
     
@@ -589,9 +591,10 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
     draw = ImageDraw.Draw(widget)
     padding = int(height * 0.05)
     yp = padding
+    user_scale = settings.get('font_scale', 100) / 100.0
     
     # Header (7% of height)
-    header_font = get_dynamic_font_size(height, 0.07)
+    header_font = get_dynamic_font_size(height, 0.07, user_scale)
     text_img = render_smooth_text("To Do", header_font, text_color, bold=True, shadow_color=shadow)
     widget.paste(text_img, (padding, yp), text_img)
     yp += int(header_font * 1.8)
@@ -612,7 +615,7 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
             continue
     upcoming.sort(key=lambda x: x[0])
     
-    body_font = get_dynamic_font_size(height, 0.055)
+    body_font = get_dynamic_font_size(height, 0.055, user_scale)
     line_h = int(body_font * 1.6)
     max_tasks = (height - yp - padding) // line_h
     
@@ -673,9 +676,10 @@ def render_notes_widget(base_image: Image.Image,
     draw = ImageDraw.Draw(widget)
     padding = int(height * 0.06)
     yp = padding
+    user_scale = settings.get('font_scale', 100) / 100.0
     
     # Header (7%)
-    header_font = get_dynamic_font_size(height, 0.07)
+    header_font = get_dynamic_font_size(height, 0.07, user_scale)
     text_img = render_smooth_text("Notes", header_font, text_color, bold=True, shadow_color=shadow)
     widget.paste(text_img, (padding, yp), text_img)
     yp += int(header_font * 1.8)
@@ -684,7 +688,7 @@ def render_notes_widget(base_image: Image.Image,
     yp += int(height * 0.03)
     
     # Body text (5%)
-    body_font = get_dynamic_font_size(height, 0.05)
+    body_font = get_dynamic_font_size(height, 0.05, user_scale)
     
     if notes_text:
         font = get_font(body_font, bold=False)
@@ -742,8 +746,9 @@ def render_clock_widget(base_image: Image.Image,
     shadow = colors['shadow']
     
     # Time text (50% of height for clock)
+    user_scale = settings.get('font_scale', 100) / 100.0
     time_str = datetime.now().strftime("%H:%M")
-    time_font = get_dynamic_font_size(height, 0.50)
+    time_font = get_dynamic_font_size(height, 0.50, user_scale)
     
     text_img = render_smooth_text(time_str, time_font, text_color, bold=True, shadow_color=shadow)
     

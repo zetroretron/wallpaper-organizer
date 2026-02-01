@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     # Global settings
     "theme": "dark",
     "blend_mode": "glass",  # "glass" (frosted) or "solid" (opaque)
+    "font_scale": 100,  # 50-150% font size scaling
     
     # Calendar widget
     "calendar_enabled": True,
