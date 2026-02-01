@@ -135,7 +135,13 @@ CALENDAR_STYLES = {
         "show_large_date": True,
         "rounded_corners": 20,
         "show_month_name": True,
-        "weekday_format": "full",  # S M T W T F S
+        "weekday_format": "full",
+    },
+    "compact": {
+        "show_large_date": False,
+        "rounded_corners": 15,
+        "show_month_name": True,
+        "weekday_format": "single",
     },
     "minimal": {
         "show_large_date": False,
@@ -147,7 +153,7 @@ CALENDAR_STYLES = {
         "show_large_date": False,
         "rounded_corners": 12,
         "show_month_name": True,
-        "weekday_format": "short",  # Sun Mon Tue...
+        "weekday_format": "short",
     },
 }
 
