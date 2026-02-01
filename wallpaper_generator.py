@@ -1,6 +1,6 @@
 """
 Wallpaper Generator - Premium Edition
-Features: 4x Supersampled Text, Glassmorphism/Solid modes, DPI-Aware Scaling
+Features: 4x Supersampled Text, Glassmorphism/Solid modes, Resolution-Independent Scaling
 """
 from datetime import datetime, timedelta
 import calendar
@@ -17,10 +17,65 @@ from config import (
 
 
 # ============================================================================
-# 4X SUPERSAMPLING TEXT RENDERING (Apple-smooth)
+# RESOLUTION-INDEPENDENT TEXT SYSTEM
 # ============================================================================
 
 SUPERSAMPLE_SCALE = 4  # 4x for smooth antialiasing
+
+
+def get_dynamic_font_size(widget_height: int, scale_factor: float = 0.05) -> int:
+    """
+    Calculate font size as percentage of widget container height.
+    
+    Args:
+        widget_height: Height of the widget in pixels
+        scale_factor: 0.0 to 1.0 (e.g., 0.05 = 5% of widget height)
+    
+    Returns:
+        Font size in pixels, minimum 10px
+    
+    Example:
+        widget_height=400, scale_factor=0.05 -> 20px font
+        widget_height=800, scale_factor=0.05 -> 40px font (4K scaling!)
+    """
+    size = int(widget_height * scale_factor)
+    return max(10, size)  # Minimum 10px for readability
+
+
+def get_auto_contrast_color(background_image: Image.Image) -> Tuple[tuple, tuple, tuple]:
+    """
+    Analyze background luminance and return optimal text colors.
+    
+    Args:
+        background_image: The cropped region behind the widget (PIL Image)
+    
+    Returns:
+        (primary_text, secondary_text, shadow_color)
+        - If bright background -> dark text
+        - If dark background -> light text
+    """
+    # Convert to grayscale and calculate average luminance
+    gray = background_image.convert('L')
+    avg_luminance = np.mean(np.array(gray))
+    
+    # Threshold at 128 (middle of 0-255 range)
+    if avg_luminance > 140:
+        # BRIGHT background -> use DARK text
+        primary = (25, 25, 30, 255)
+        secondary = (60, 60, 70, 255)
+        shadow = (255, 255, 255, 80)  # Light shadow for dark text
+    elif avg_luminance > 90:
+        # MID-TONE background -> use WHITE with strong shadow
+        primary = (255, 255, 255, 255)
+        secondary = (220, 220, 230, 255)
+        shadow = (0, 0, 0, 180)  # Strong shadow for readability
+    else:
+        # DARK background -> use WHITE text
+        primary = (255, 255, 255, 255)
+        secondary = (200, 200, 210, 255)
+        shadow = (0, 0, 0, 120)
+    
+    return primary, secondary, shadow
 
 
 def get_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
@@ -41,6 +96,9 @@ def render_smooth_text(text: str, font_size: int, color: tuple,
     Render text at 4x resolution then downsample for smooth antialiasing.
     Returns transparent RGBA image cropped to text bounds.
     """
+    # Ensure minimum size
+    font_size = max(10, font_size)
+    
     # Load font at 4x size
     large_size = font_size * SUPERSAMPLE_SCALE
     font = get_font(large_size, bold)
@@ -57,7 +115,7 @@ def render_smooth_text(text: str, font_size: int, color: tuple,
     large_img = Image.new('RGBA', (text_w + 20, text_h + 20), (0, 0, 0, 0))
     draw = ImageDraw.Draw(large_img)
     
-    # Draw position (accounting for bbox offset)
+    # Draw position
     x = -bbox[0] + shadow_offset * SUPERSAMPLE_SCALE
     y = -bbox[1] + shadow_offset * SUPERSAMPLE_SCALE
     
@@ -71,37 +129,47 @@ def render_smooth_text(text: str, font_size: int, color: tuple,
     # Draw main text at 4x
     draw.text((x, y), text, font=font, fill=color)
     
-    # Downsample with high-quality LANCZOS
-    final_w = text_w // SUPERSAMPLE_SCALE
-    final_h = text_h // SUPERSAMPLE_SCALE
+    # Downsample with LANCZOS
+    final_w = max(1, text_w // SUPERSAMPLE_SCALE)
+    final_h = max(1, text_h // SUPERSAMPLE_SCALE)
     
     result = large_img.resize((final_w + 5, final_h + 5), Image.Resampling.LANCZOS)
-    
     return result
 
 
-def draw_smooth_text(base_image: Image.Image, pos: tuple, text: str,
-                     font_size: int, color: tuple, bold: bool = True,
-                     shadow_color: tuple = None, shadow_offset: int = 2,
-                     anchor: str = None):
+def draw_text(target: Image.Image, pos: tuple, text: str,
+              widget_height: int, scale_factor: float, colors: tuple,
+              bold: bool = True, anchor: str = None):
     """
-    Draw supersampled text onto base image.
-    anchor: 'lt' (left-top), 'mt' (middle-top), 'mm' (middle-middle)
+    All-in-one text drawing with dynamic sizing and auto-contrast.
+    
+    Args:
+        target: Image to draw on
+        pos: (x, y) position
+        text: Text string
+        widget_height: Height of widget container (for font scaling)
+        scale_factor: Font size as % of widget height (0.05 = 5%)
+        colors: (primary, secondary, shadow) tuple from get_auto_contrast_color
+        bold: Whether to use bold font
+        anchor: 'mt' (middle-top) or 'mm' (middle-middle) or None (left-top)
     """
-    text_img = render_smooth_text(text, font_size, color, bold, shadow_color, shadow_offset)
+    primary, secondary, shadow = colors
+    font_size = get_dynamic_font_size(widget_height, scale_factor)
+    
+    text_img = render_smooth_text(text, font_size, primary, bold, shadow)
     
     x, y = pos
     w, h = text_img.size
     
-    # Handle anchors
-    if anchor == 'mt':  # Middle-top
+    if anchor == 'mt':
         x = x - w // 2
-    elif anchor == 'mm':  # Middle-middle
+    elif anchor == 'mm':
         x = x - w // 2
         y = y - h // 2
     
-    # Paste with transparency
-    base_image.paste(text_img, (int(x), int(y)), text_img)
+    target.paste(text_img, (int(x), int(y)), text_img)
+    return font_size  # Return actual size for layout calculations
+
 
 
 # ============================================================================
@@ -288,24 +356,19 @@ def get_optimal_glass_params(image: Image.Image, region: tuple) -> dict:
                 'tint_color': (255, 255, 255), 'tint_strength': 0.12}
 
 
-def get_adaptive_colors(image: Image.Image, region: tuple, use_glass: bool = True) -> dict:
-    """Get optimal text colors based on background."""
-    cropped = image.crop(region).convert('L')
-    avg_brightness = np.mean(np.array(cropped)) / 255.0
+def get_adaptive_colors(image: Image.Image, region: tuple) -> dict:
+    """
+    Get optimal text colors based on ACTUAL background luminance.
+    This is the critical fix for contrast issues.
+    """
+    cropped = image.crop(region)
     
-    # For solid mode, use theme colors; for glass, adapt to image
-    if avg_brightness < 0.45 or use_glass:
-        text = (255, 255, 255)
-        text_secondary = (200, 200, 210)
-        shadow = (0, 0, 0, 120)
-    else:
-        text = (35, 35, 40)
-        text_secondary = (80, 80, 90)
-        shadow = (255, 255, 255, 60)
+    # Use the new auto-contrast function
+    primary, secondary, shadow = get_auto_contrast_color(cropped)
     
-    # Generate accent
+    # Generate accent colors from dominant color
     import colorsys
-    color_crop = image.crop(region).convert('RGB').resize((30, 30))
+    color_crop = cropped.convert('RGB').resize((30, 30))
     dominant = tuple(map(int, np.mean(np.array(color_crop).reshape(-1, 3), axis=0)))
     
     r, g, b = [x / 255.0 for x in dominant]
@@ -314,99 +377,127 @@ def get_adaptive_colors(image: Image.Image, region: tuple, use_glass: bool = Tru
     h_accent = (h + 0.45) % 1.0
     s_accent = min(1.0, s * 1.5 + 0.3)
     r, g, b = colorsys.hls_to_rgb(h_accent, 0.55, s_accent)
-    accent = (int(r * 255), int(g * 255), int(b * 255))
+    accent = (int(r * 255), int(g * 255), int(b * 255), 255)
     
     h_today = (h + 0.3) % 1.0
     r, g, b = colorsys.hls_to_rgb(h_today, 0.5, 0.8)
-    today = (int(r * 255), int(g * 255), int(b * 255))
+    today = (int(r * 255), int(g * 255), int(b * 255), 255)
     
-    return {'text': text, 'text_secondary': text_secondary, 'shadow': shadow,
-            'accent': accent, 'today': today, 'brightness': avg_brightness}
+    # Calculate luminance for reference
+    gray = cropped.convert('L')
+    avg_luminance = np.mean(np.array(gray))
+    
+    return {
+        'text': primary, 
+        'text_secondary': secondary, 
+        'shadow': shadow,
+        'accent': accent, 
+        'today': today, 
+        'luminance': avg_luminance
+    }
+
 
 
 # ============================================================================
-# WIDGET RENDERERS WITH SUPERSAMPLED TEXT
+# WIDGET RENDERERS - Resolution Independent
 # ============================================================================
 
 def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
                            x: int, y: int, width: int, height: int,
                            settings: dict, scale: dict, theme: dict) -> Tuple[Image.Image, tuple]:
-    """Render calendar with smooth text."""
+    """
+    Render calendar with resolution-independent text.
+    Font sizes are percentages of widget height.
+    """
     region = (x, y, x + width, y + height)
     use_glass = settings.get('blend_mode', 'glass') == 'glass'
     
+    # Create widget background
     if use_glass:
         glass_params = get_optimal_glass_params(base_image, region)
         widget = apply_glassmorphism(base_image, region, border_radius=scale['border_radius'],
                                       **glass_params)
     else:
         widget = apply_solid_background(width, height, theme, 
-                                         opacity=int(settings.get('opacity', 90) * 255 / 100),
+                                         opacity=int(settings.get('calendar_opacity', 90) * 255 / 100),
                                          border_radius=scale['border_radius'])
     
-    colors = get_adaptive_colors(base_image, region, use_glass)
-    if not use_glass:
-        colors['text'] = theme['text_color']
-        colors['text_secondary'] = theme['text_secondary']
-        colors['today'] = theme['today_color']
-        colors['shadow'] = None
+    # Get AUTO-CONTRAST colors from actual background
+    colors = get_adaptive_colors(base_image, region)
     
-    text_color = (*colors['text'], 255)
-    text_secondary = (*colors['text_secondary'], 255)
-    accent = (*colors['accent'], 255)
-    today_color = (*colors['today'], 255)
+    # For solid mode with light themes, override with theme colors
+    if not use_glass:
+        # Check if theme is light-colored
+        theme_brightness = sum(theme['bg_color']) / 3
+        if theme_brightness > 180:
+            colors['text'] = (*theme['text_color'], 255)
+            colors['text_secondary'] = (*theme['text_secondary'], 255)
+            colors['today'] = (*theme['today_color'], 255)
+            colors['shadow'] = None
+    
+    text_color = colors['text']
+    text_secondary = colors['text_secondary']
+    accent = colors['accent']
+    today_color = colors['today']
     shadow = colors['shadow']
     
-    padding = scale['padding']
+    padding = int(height * 0.04)  # 4% padding
     yp = padding
-    today = datetime.now()
-    
+    today_dt = datetime.now()
     style = settings.get('calendar_style', 'aesthetic')
     
-    # Large date (aesthetic mode)
-    if style not in ['compact', 'minimal']:
-        large_size = calculate_font_size(width, height, 'large_date', scale['dpi_scale'])
-        day_str = f"{today.day:02d}"
-        draw_smooth_text(widget, (padding + 5, yp), day_str, large_size, text_color,
-                         bold=True, shadow_color=shadow)
-        
-        # Month/year
-        month_size = calculate_font_size(width, height, 'title', scale['dpi_scale'])
-        mx = padding + int(large_size * 1.3)
-        draw_smooth_text(widget, (mx, yp + 5), calendar.month_name[today.month],
-                         month_size, text_secondary, bold=False)
-        draw_smooth_text(widget, (mx, yp + month_size + 8), str(today.year),
-                         int(month_size * 0.85), text_secondary, bold=False)
-        
-        yp += int(large_size * 1.1)
-    else:
-        # Compact header
-        header_size = calculate_font_size(width, height, 'header', scale['dpi_scale'])
-        header_text = f"{calendar.month_abbr[today.month]} {today.day}, {today.year}"
-        draw_smooth_text(widget, (padding, yp), header_text, header_size, text_color,
-                         bold=True, shadow_color=shadow)
-        yp += int(header_size * 1.8)
-    
-    # Divider
     draw = ImageDraw.Draw(widget)
-    draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
-    yp += 10
     
-    # Weekdays
-    weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+    # === LARGE DATE (aesthetic mode) ===
+    if style not in ['compact', 'minimal']:
+        # Large date = 25% of widget height
+        large_font = get_dynamic_font_size(height, 0.25)
+        day_str = f"{today_dt.day:02d}"
+        
+        text_img = render_smooth_text(day_str, large_font, text_color, bold=True, shadow_color=shadow)
+        widget.paste(text_img, (padding + 5, yp), text_img)
+        
+        # Month/year next to large date (7% and 6%)
+        month_font = get_dynamic_font_size(height, 0.07)
+        year_font = get_dynamic_font_size(height, 0.06)
+        mx = padding + int(large_font * 1.4)
+        
+        month_img = render_smooth_text(calendar.month_name[today_dt.month], month_font, text_secondary, bold=False)
+        widget.paste(month_img, (mx, yp + 5), month_img)
+        
+        year_img = render_smooth_text(str(today_dt.year), year_font, text_secondary, bold=False)
+        widget.paste(year_img, (mx, yp + month_font + 10), year_img)
+        
+        yp += int(large_font * 1.15)
+    else:
+        # Compact header (6% of height)
+        header_font = get_dynamic_font_size(height, 0.06)
+        header_text = f"{calendar.month_abbr[today_dt.month]} {today_dt.day}, {today_dt.year}"
+        
+        text_img = render_smooth_text(header_text, header_font, text_color, bold=True, shadow_color=shadow)
+        widget.paste(text_img, (padding, yp), text_img)
+        yp += int(header_font * 1.8)
+    
+    # === DIVIDER ===
+    draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
+    yp += int(height * 0.025)
+    
+    # === WEEKDAYS (4.5% of height) ===
     cell_w = (width - padding * 2) // 7
-    wd_size = calculate_font_size(width, height, 'weekday', scale['dpi_scale'])
+    wd_font = get_dynamic_font_size(height, 0.045)
+    weekdays = ["S", "M", "T", "W", "T", "F", "S"]
     
     for i, wd in enumerate(weekdays):
         wx = padding + i * cell_w + cell_w // 2
         col = accent if i == 0 else text_secondary
-        draw_smooth_text(widget, (wx, yp), wd, wd_size, col, bold=True, anchor='mt')
+        text_img = render_smooth_text(wd, wd_font, col, bold=True)
+        widget.paste(text_img, (wx - text_img.width // 2, yp), text_img)
     
-    yp += int(wd_size * 1.6)
+    yp += int(wd_font * 1.6)
     
-    # Calendar grid
-    cal = calendar.Calendar(firstweekday=6)
-    month_days = cal.monthdayscalendar(today.year, today.month)
+    # === CALENDAR GRID (5% of height per day) ===
+    cal_obj = calendar.Calendar(firstweekday=6)
+    month_days = cal_obj.monthdayscalendar(today_dt.year, today_dt.month)
     
     tasks_by_date = {}
     for t in tasks:
@@ -415,9 +506,8 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
             tasks_by_date[d] = []
         tasks_by_date[d].append(t)
     
-    day_size = calculate_font_size(width, height, 'day', scale['dpi_scale'])
-    cell_h = int(day_size * 1.6)
-    
+    day_font = get_dynamic_font_size(height, 0.05)
+    cell_h = int(height * 0.08)
     max_weeks = 5 if style in ['compact', 'minimal'] else 6
     
     for week in month_days[:max_weeks]:
@@ -426,11 +516,12 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
                 continue
             
             cx = padding + i * cell_w + cell_w // 2
-            date_str = f"{today.year}-{today.month:02d}-{day:02d}"
+            date_str = f"{today_dt.year}-{today_dt.month:02d}-{day:02d}"
             has_tasks = date_str in tasks_by_date
             
-            if day == today.day:
-                r = int(day_size * 0.75)
+            # Today highlight
+            if day == today_dt.day:
+                r = int(day_font * 0.8)
                 draw.ellipse([cx - r, yp - r + 4, cx + r, yp + r + 4], fill=today_color)
                 day_text_col = (255, 255, 255, 255)
             elif i == 0:
@@ -438,15 +529,16 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
             else:
                 day_text_col = text_color
             
-            draw_smooth_text(widget, (cx, yp + 4), str(day), day_size, day_text_col,
-                             bold=False, anchor='mt')
+            text_img = render_smooth_text(str(day), day_font, day_text_col, bold=False)
+            widget.paste(text_img, (cx - text_img.width // 2, yp + 4), text_img)
             
-            if has_tasks and day != today.day:
+            # Task dots
+            if has_tasks and day != today_dt.day:
                 for j, task in enumerate(tasks_by_date[date_str][:2]):
                     cat = task.get("category", "default")
                     dot_col = (*CATEGORY_COLORS.get(cat, (150, 150, 150)), 255)
                     dx = cx - 3 + j * 6
-                    draw.ellipse([dx - 2, yp + day_size + 3, dx + 2, yp + day_size + 7], fill=dot_col)
+                    draw.ellipse([dx - 2, yp + day_font + 3, dx + 2, yp + day_font + 7], fill=dot_col)
         
         yp += cell_h
     
@@ -456,7 +548,7 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
 def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
                        x: int, y: int, width: int, height: int,
                        settings: dict, scale: dict, theme: dict) -> Tuple[Image.Image, tuple]:
-    """Render To-Do with smooth text."""
+    """Render To-Do with resolution-independent text."""
     region = (x, y, x + width, y + height)
     use_glass = settings.get('blend_mode', 'glass') == 'glass'
     
@@ -466,33 +558,29 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
                                       **glass_params)
     else:
         widget = apply_solid_background(width, height, theme,
-                                         opacity=int(settings.get('opacity', 85) * 255 / 100),
+                                         opacity=int(settings.get('todo_opacity', 85) * 255 / 100),
                                          border_radius=scale['border_radius'])
     
-    colors = get_adaptive_colors(base_image, region, use_glass)
-    if not use_glass:
-        colors['text'] = theme['text_color']
-        colors['text_secondary'] = theme['text_secondary']
-        colors['shadow'] = None
-    
-    text_color = (*colors['text'], 255)
-    text_secondary = (*colors['text_secondary'], 255)
+    # Auto-contrast colors from actual background
+    colors = get_adaptive_colors(base_image, region)
+    text_color = colors['text']
+    text_secondary = colors['text_secondary']
     shadow = colors['shadow']
     
     draw = ImageDraw.Draw(widget)
-    padding = scale['padding']
+    padding = int(height * 0.05)
     yp = padding
     
-    # Header
-    header_size = calculate_font_size(width, height, 'header', scale['dpi_scale'])
-    draw_smooth_text(widget, (padding, yp), "To Do", header_size, text_color,
-                     bold=True, shadow_color=shadow)
-    yp += int(header_size * 1.8)
+    # Header (7% of height)
+    header_font = get_dynamic_font_size(height, 0.07)
+    text_img = render_smooth_text("To Do", header_font, text_color, bold=True, shadow_color=shadow)
+    widget.paste(text_img, (padding, yp), text_img)
+    yp += int(header_font * 1.8)
     
     draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
-    yp += 8
+    yp += int(height * 0.025)
     
-    # Tasks
+    # Tasks (5% font size)
     today_date = datetime.now().date()
     upcoming = []
     for task in tasks:
@@ -505,8 +593,8 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
             continue
     upcoming.sort(key=lambda x: x[0])
     
-    body_size = calculate_font_size(width, height, 'body', scale['dpi_scale'])
-    line_h = int(body_size * 1.5)
+    body_font = get_dynamic_font_size(height, 0.055)
+    line_h = int(body_font * 1.6)
     max_tasks = (height - yp - padding) // line_h
     
     for delta, task in upcoming[:max_tasks]:
@@ -515,20 +603,27 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
         
         cat = task.get("category", "default")
         cat_color = (*CATEGORY_COLORS.get(cat, (150, 150, 150)), 255)
-        draw.ellipse([padding, yp + 3, padding + 8, yp + 11], fill=cat_color)
-        draw.rectangle([padding + 14, yp + 1, padding + 24, yp + 11],
+        dot_size = max(4, int(body_font * 0.3))
+        draw.ellipse([padding, yp + 3, padding + dot_size * 2, yp + 3 + dot_size * 2], fill=cat_color)
+        
+        # Checkbox
+        cb_size = max(8, int(body_font * 0.5))
+        draw.rectangle([padding + dot_size * 2 + 6, yp + 2, 
+                       padding + dot_size * 2 + 6 + cb_size, yp + 2 + cb_size],
                        outline=text_secondary, width=1)
         
         title = task.get("title", "")
-        max_chars = (width - 45) // int(body_size * 0.55)
+        max_chars = int((width - padding * 2 - dot_size * 2 - cb_size - 20) / (body_font * 0.5))
         if len(title) > max_chars:
             title = title[:max_chars - 2] + ".."
         
-        draw_smooth_text(widget, (padding + 30, yp - 1), title, body_size, text_color, bold=False)
+        text_img = render_smooth_text(title, body_font, text_color, bold=False)
+        widget.paste(text_img, (padding + dot_size * 2 + cb_size + 12, yp - 1), text_img)
         yp += line_h
     
     if not upcoming:
-        draw_smooth_text(widget, (padding, yp), "No tasks", body_size, text_secondary, bold=False)
+        text_img = render_smooth_text("No tasks", body_font, text_secondary, bold=False)
+        widget.paste(text_img, (padding, yp), text_img)
     
     return widget, (x, y)
 
@@ -536,7 +631,7 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
 def render_notes_widget(base_image: Image.Image,
                         x: int, y: int, width: int, height: int,
                         settings: dict, scale: dict, theme: dict) -> Tuple[Image.Image, tuple]:
-    """Render Notes with smooth text."""
+    """Render Notes with resolution-independent text."""
     region = (x, y, x + width, y + height)
     notes_text = load_notes()
     use_glass = settings.get('blend_mode', 'glass') == 'glass'
@@ -547,36 +642,33 @@ def render_notes_widget(base_image: Image.Image,
                                       **glass_params)
     else:
         widget = apply_solid_background(width, height, theme,
-                                         opacity=int(settings.get('opacity', 85) * 255 / 100),
+                                         opacity=int(settings.get('notes_opacity', 85) * 255 / 100),
                                          border_radius=scale['border_radius'])
     
-    colors = get_adaptive_colors(base_image, region, use_glass)
-    if not use_glass:
-        colors['text'] = theme['text_color']
-        colors['text_secondary'] = theme['text_secondary']
-        colors['shadow'] = None
-    
-    text_color = (*colors['text'], 255)
-    text_secondary = (*colors['text_secondary'], 255)
+    # Auto-contrast colors
+    colors = get_adaptive_colors(base_image, region)
+    text_color = colors['text']
+    text_secondary = colors['text_secondary']
     shadow = colors['shadow']
     
     draw = ImageDraw.Draw(widget)
-    padding = scale['padding']
+    padding = int(height * 0.06)
     yp = padding
     
-    header_size = calculate_font_size(width, height, 'header', scale['dpi_scale'])
-    draw_smooth_text(widget, (padding, yp), "Notes", header_size, text_color,
-                     bold=True, shadow_color=shadow)
-    yp += int(header_size * 1.8)
+    # Header (7%)
+    header_font = get_dynamic_font_size(height, 0.07)
+    text_img = render_smooth_text("Notes", header_font, text_color, bold=True, shadow_color=shadow)
+    widget.paste(text_img, (padding, yp), text_img)
+    yp += int(header_font * 1.8)
     
     draw.line([(padding, yp), (width - padding, yp)], fill=(*text_secondary[:3], 60), width=1)
-    yp += 10
+    yp += int(height * 0.03)
     
-    body_size = calculate_font_size(width, height, 'body', scale['dpi_scale'])
+    # Body text (5%)
+    body_font = get_dynamic_font_size(height, 0.05)
     
     if notes_text:
-        # Simple word wrap
-        font = get_font(body_size, bold=False)
+        font = get_font(body_font, bold=False)
         lines = []
         max_w = width - padding * 2
         
@@ -595,14 +687,16 @@ def render_notes_widget(base_image: Image.Image,
             if line:
                 lines.append(line)
         
-        line_h = int(body_size * 1.35)
+        line_h = int(body_font * 1.4)
         max_lines = (height - yp - padding) // line_h
         
         for line in lines[:max_lines]:
-            draw_smooth_text(widget, (padding, yp), line, body_size, text_color, bold=False)
+            text_img = render_smooth_text(line, body_font, text_color, bold=False)
+            widget.paste(text_img, (padding, yp), text_img)
             yp += line_h
     else:
-        draw_smooth_text(widget, (padding, yp), "Add notes...", body_size, text_secondary, bold=False)
+        text_img = render_smooth_text("Add notes...", body_font, text_secondary, bold=False)
+        widget.paste(text_img, (padding, yp), text_img)
     
     return widget, (x, y)
 
@@ -610,7 +704,7 @@ def render_notes_widget(base_image: Image.Image,
 def render_clock_widget(base_image: Image.Image,
                         x: int, y: int, width: int, height: int,
                         settings: dict, scale: dict, theme: dict) -> Tuple[Image.Image, tuple]:
-    """Render Clock with smooth text."""
+    """Render Clock with resolution-independent text."""
     region = (x, y, x + width, y + height)
     use_glass = settings.get('blend_mode', 'glass') == 'glass'
     
@@ -620,22 +714,24 @@ def render_clock_widget(base_image: Image.Image,
                                       **glass_params)
     else:
         widget = apply_solid_background(width, height, theme,
-                                         opacity=int(settings.get('opacity', 90) * 255 / 100),
+                                         opacity=int(settings.get('clock_opacity', 90) * 255 / 100),
                                          border_radius=scale['border_radius'])
     
-    colors = get_adaptive_colors(base_image, region, use_glass)
-    if not use_glass:
-        colors['text'] = theme['text_color']
-        colors['shadow'] = None
-    
-    text_color = (*colors['text'], 255)
+    # Auto-contrast colors
+    colors = get_adaptive_colors(base_image, region)
+    text_color = colors['text']
     shadow = colors['shadow']
     
+    # Time text (50% of height for clock)
     time_str = datetime.now().strftime("%H:%M")
-    time_size = calculate_font_size(width, height, 'large_date', scale['dpi_scale'])
+    time_font = get_dynamic_font_size(height, 0.50)
     
-    draw_smooth_text(widget, (width // 2, height // 2), time_str, time_size,
-                     text_color, bold=True, shadow_color=shadow, anchor='mm')
+    text_img = render_smooth_text(time_str, time_font, text_color, bold=True, shadow_color=shadow)
+    
+    # Center the text
+    tx = (width - text_img.width) // 2
+    ty = (height - text_img.height) // 2
+    widget.paste(text_img, (tx, ty), text_img)
     
     return widget, (x, y)
 
