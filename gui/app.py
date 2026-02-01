@@ -236,7 +236,7 @@ class WallpaperCalendarApp(ctk.CTk):
         frame = ctk.CTkFrame(parent)
         frame.pack(fill="x", pady=5)
         
-        # Header row
+        # Header row (Toggle checkbox)
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(8, 3))
         
@@ -247,89 +247,28 @@ class WallpaperCalendarApp(ctk.CTk):
                         variable=enabled_var,
                         command=lambda: self._on_widget_toggle(widget_key)).pack(side="left")
         
-        # Font Scale Slider next to title
-        font_scale_key = f"{widget_key}_font_scale"
-        current_font_scale = self.settings.get(font_scale_key, 100)
+        # Controls Container
+        controls = ctk.CTkFrame(frame, fg_color="transparent")
+        controls.pack(fill="x", padx=5, pady=2)
         
-        f_frame = ctk.CTkFrame(header, fg_color="transparent")
-        f_frame.pack(side="right")
+        # 1. Position Controls (X, Y)
+        self._add_control_row(controls, "Pos X %", f"{widget_key}_x_percent", 0, 100)
+        self._add_control_row(controls, "Pos Y %", f"{widget_key}_y_percent", 0, 100)
         
-        ctk.CTkLabel(f_frame, text="Font:").pack(side="left", padx=(10, 5))
-        f_slider = ctk.CTkSlider(f_frame, from_=50, to=200, width=80, number_of_steps=30,
-                                  command=lambda v, k=font_scale_key: self._on_font_live(k, v))
-        f_slider.set(current_font_scale)
-        f_slider.pack(side="left")
-        setattr(self, f"{widget_key}_font_slider", f_slider)
-
-        # X/Y in same row
-        pos_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        pos_frame.pack(fill="x", padx=10, pady=2)
-
-        
-        # X
-        ctk.CTkLabel(pos_frame, text="X:", width=20).pack(side="left")
-        x_slider = ctk.CTkSlider(pos_frame, from_=0, to=100, width=100, number_of_steps=50,
-                                  command=lambda v, k=widget_key: self._on_pos_live(k, 'x', v))
-        x_slider.set(self.settings.get(f"{widget_key}_x_percent", 0))
-        x_slider.pack(side="left", padx=5)
-        setattr(self, f"{widget_key}_x_slider", x_slider)
-        
-        x_label = ctk.CTkLabel(pos_frame, text=f"{int(x_slider.get())}%", width=35)
-        x_label.pack(side="left")
-        setattr(self, f"{widget_key}_x_label", x_label)
-        
-        # Y
-        ctk.CTkLabel(pos_frame, text="  Y:", width=25).pack(side="left")
-        y_slider = ctk.CTkSlider(pos_frame, from_=0, to=100, width=100, number_of_steps=50,
-                                  command=lambda v, k=widget_key: self._on_pos_live(k, 'y', v))
-        y_slider.set(self.settings.get(f"{widget_key}_y_percent", 0))
-        y_slider.pack(side="left", padx=5)
-        setattr(self, f"{widget_key}_y_slider", y_slider)
-        
-        y_label = ctk.CTkLabel(pos_frame, text=f"{int(y_slider.get())}%", width=35)
-        y_label.pack(side="left")
-        setattr(self, f"{widget_key}_y_label", y_label)
-        
-        # Size or Width/Height
+        # 2. Size Controls (Width/Height or Size)
         if show_size:
-            size_frame = ctk.CTkFrame(frame, fg_color="transparent")
-            size_frame.pack(fill="x", padx=10, pady=(0, 5))
-            
-            ctk.CTkLabel(size_frame, text="Size:").pack(side="left")
-            s_slider = ctk.CTkSlider(size_frame, from_=15, to=40, width=150, number_of_steps=25,
-                                      command=lambda v, k=show_size, w=widget_key: self._on_size_live(k, w, v))
-            s_slider.set(self.settings.get(show_size, 25))
-            s_slider.pack(side="left", padx=10)
-            
-            s_label = ctk.CTkLabel(size_frame, text=f"{int(s_slider.get())}%")
-            s_label.pack(side="left")
-            setattr(self, f"{widget_key}_size_label", s_label)
+            self._add_control_row(controls, "Size %", show_size, 10, 100)
         
         if show_wh:
-            wh_frame = ctk.CTkFrame(frame, fg_color="transparent")
-            wh_frame.pack(fill="x", padx=10, pady=(0, 5))
+            self._add_control_row(controls, "Width %", f"{widget_key}_width_percent", 10, 100)
+            self._add_control_row(controls, "Height %", f"{widget_key}_height_percent", 10, 100)
             
-            ctk.CTkLabel(wh_frame, text="W:").pack(side="left")
-            w_slider = ctk.CTkSlider(wh_frame, from_=15, to=35, width=80, number_of_steps=20,
-                                      command=lambda v, k=widget_key: self._on_wh_live(k, 'width', v))
-            w_slider.set(self.settings.get(f"{widget_key}_width_percent", 22))
-            w_slider.pack(side="left", padx=3)
-            
-            w_label = ctk.CTkLabel(wh_frame, text=f"{int(w_slider.get())}%", width=35)
-            w_label.pack(side="left")
-            setattr(self, f"{widget_key}_w_label", w_label)
-            
-            ctk.CTkLabel(wh_frame, text=" H:").pack(side="left")
-            h_slider = ctk.CTkSlider(wh_frame, from_=20, to=50, width=80, number_of_steps=30,
-                                      command=lambda v, k=widget_key: self._on_wh_live(k, 'height', v))
-            h_slider.set(self.settings.get(f"{widget_key}_height_percent", 35))
-            h_slider.pack(side="left", padx=3)
-            
-            h_label = ctk.CTkLabel(wh_frame, text=f"{int(h_slider.get())}%", width=35)
-            h_label.pack(side="left")
-            setattr(self, f"{widget_key}_h_label", h_label)
-    
+        # 3. Appearance Controls (Opacity, Font)
+        self._add_control_row(controls, "Opacity %", f"{widget_key}_opacity", 0, 100)
+        self._add_control_row(controls, "Font %", f"{widget_key}_font_scale", 10, 300)
+
     def _on_pos_live(self, widget_key, axis, value):
+
         self.settings[f"{widget_key}_{axis}_percent"] = int(value)
         label = getattr(self, f"{widget_key}_{axis}_label")
         label.configure(text=f"{int(value)}%")
@@ -340,20 +279,51 @@ class WallpaperCalendarApp(ctk.CTk):
         self.settings[size_key] = int(value)
         label = getattr(self, f"{widget_key}_size_label")
         label.configure(text=f"{int(value)}%")
-        save_settings(self.settings)
-        self._schedule_preview_update()
     
-    def _on_font_live(self, settings_key, value):
-        self.settings[settings_key] = int(value)
-        save_settings(self.settings)
-        self._schedule_preview_update()
-    
-    def _on_wh_live(self, widget_key, dim, value):
-        self.settings[f"{widget_key}_{dim}_percent"] = int(value)
-        label = getattr(self, f"{widget_key}_{dim[0]}_label")
-        label.configure(text=f"{int(value)}%")
-        save_settings(self.settings)
-        self._schedule_preview_update()
+    def _add_control_row(self, parent, label_text, settings_key, min_val, max_val, callback_key=None):
+        """Add a row with Label | Slider | Number Entry"""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=2)
+        
+        # Label
+        ctk.CTkLabel(row, text=label_text, width=60, anchor="w").pack(side="left")
+        
+        # Current value
+        current_val = self.settings.get(settings_key, min_val)
+        
+        # Variable to sync slider and entry
+        var = ctk.IntVar(value=int(current_val))
+        
+        # Callback wrapper
+        def on_change(value):
+            val = int(float(value))
+            self.settings[settings_key] = val
+            save_settings(self.settings)
+            self._schedule_preview_update()
+        
+        # Slider
+        slider = ctk.CTkSlider(row, from_=min_val, to=max_val, variable=var, 
+                               command=on_change, width=120)
+        slider.pack(side="left", padx=5)
+        
+        # Entry (Number input)
+        entry = ctk.CTkEntry(row, width=50, textvariable=var)
+        entry.pack(side="left", padx=5)
+        
+        # Bind entry to update on Enter or FocusOut
+        def on_entry_commit(event=None):
+            try:
+                val = int(entry.get())
+                # Clamp value
+                val = max(min_val, min(max_val, val))
+                var.set(val)
+                on_change(val)
+            except ValueError:
+                pass
+                
+        entry.bind("<Return>", on_entry_commit)
+        entry.bind("<FocusOut>", on_entry_commit)
+
     
     def _on_widget_toggle(self, widget_key):
         var = getattr(self, f"{widget_key}_enabled_var")
@@ -376,13 +346,6 @@ class WallpaperCalendarApp(ctk.CTk):
         save_settings(self.settings)
         self._schedule_preview_update()
 
-    def _on_font_scale_change(self, value):
-        self.settings['font_scale'] = int(value)
-        self.font_scale_label.configure(text=f"{int(value)}%")
-        save_settings(self.settings)
-        self._schedule_preview_update()
-
-    
     def _schedule_preview_update(self):
         """Debounce preview updates to avoid lag"""
         if self._preview_job:
