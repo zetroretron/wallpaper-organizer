@@ -369,16 +369,44 @@ def get_optimal_glass_params(image: Image.Image, region: tuple) -> dict:
                 'tint_color': (255, 255, 255), 'tint_strength': 0.12}
 
 
-def get_adaptive_colors(image: Image.Image, region: tuple) -> dict:
+def get_adaptive_colors(image: Image.Image, region: tuple, use_glass: bool = True) -> dict:
     """
-    Get optimal text colors based on ACTUAL background luminance.
-    This is the critical fix for contrast issues.
+    Get optimal text colors.
+    Handles contrast inversion for Glass Mode (where Dark BG -> Light Glass).
     """
     cropped = image.crop(region)
+    gray = cropped.convert('L')
+    avg_luminance = np.mean(np.array(gray))
     
-    # Use the new auto-contrast function
-    primary, secondary, shadow = get_auto_contrast_color(cropped)
+    # Predict effective luminance for text contrast
+    effective_luminance = avg_luminance
     
+    if use_glass:
+        # Glass effect inverts brightness to ensure visibility against background
+        # If bg is dark (<90), glass becomes LIGHT -> needs DARK text
+        # If bg is light (>160), glass becomes DARK -> needs WHITE text
+        if avg_luminance < 90:
+            effective_luminance = 200  # Simulated Light Glass
+        elif avg_luminance > 160:
+            effective_luminance = 50   # Simulated Dark Glass
+            
+    # Use auto-contrast on the EFFECTIVE luminance
+    if effective_luminance > 140:
+        # Bright background -> DARK text
+        primary = (25, 25, 30, 255)
+        secondary = (60, 60, 70, 255)
+        shadow = (255, 255, 255, 80)
+    elif effective_luminance > 90:
+        # Mid-tone -> White with strong shadow
+        primary = (255, 255, 255, 255)
+        secondary = (220, 220, 230, 255)
+        shadow = (0, 0, 0, 180)
+    else:
+        # Dark background -> White text
+        primary = (255, 255, 255, 255)
+        secondary = (200, 200, 210, 255)
+        shadow = (0, 0, 0, 120)
+
     # Generate accent colors from dominant color
     import colorsys
     color_crop = cropped.convert('RGB').resize((30, 30))
@@ -396,10 +424,6 @@ def get_adaptive_colors(image: Image.Image, region: tuple) -> dict:
     r, g, b = colorsys.hls_to_rgb(h_today, 0.5, 0.8)
     today = (int(r * 255), int(g * 255), int(b * 255), 255)
     
-    # Calculate luminance for reference
-    gray = cropped.convert('L')
-    avg_luminance = np.mean(np.array(gray))
-    
     return {
         'text': primary, 
         'text_secondary': secondary, 
@@ -408,6 +432,7 @@ def get_adaptive_colors(image: Image.Image, region: tuple) -> dict:
         'today': today, 
         'luminance': avg_luminance
     }
+
 
 
 
@@ -435,8 +460,8 @@ def render_calendar_widget(base_image: Image.Image, tasks: List[Dict],
                                          opacity=int(settings.get('calendar_opacity', 90) * 255 / 100),
                                          border_radius=scale['border_radius'])
     
-    # Get AUTO-CONTRAST colors from actual background
-    colors = get_adaptive_colors(base_image, region)
+    # Get AUTO-CONTRAST colors from actual background (with glass correction)
+    colors = get_adaptive_colors(base_image, region, use_glass)
     
     # For solid mode with light themes, override with theme colors
     if not use_glass:
@@ -577,7 +602,7 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
                                          border_radius=scale['border_radius'])
     
     # Auto-contrast colors from actual background
-    colors = get_adaptive_colors(base_image, region)
+    colors = get_adaptive_colors(base_image, region, use_glass)
     text_color = colors['text']
     text_secondary = colors['text_secondary']
     shadow = colors['shadow']
@@ -662,7 +687,7 @@ def render_notes_widget(base_image: Image.Image,
                                          border_radius=scale['border_radius'])
     
     # Auto-contrast colors
-    colors = get_adaptive_colors(base_image, region)
+    colors = get_adaptive_colors(base_image, region, use_glass)
     text_color = colors['text']
     text_secondary = colors['text_secondary']
     shadow = colors['shadow']
@@ -735,7 +760,7 @@ def render_clock_widget(base_image: Image.Image,
                                          border_radius=scale['border_radius'])
     
     # Auto-contrast colors
-    colors = get_adaptive_colors(base_image, region)
+    colors = get_adaptive_colors(base_image, region, use_glass)
     text_color = colors['text']
     shadow = colors['shadow']
     
