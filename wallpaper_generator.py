@@ -23,23 +23,31 @@ from config import (
 SUPERSAMPLE_SCALE = 4  # 4x for smooth antialiasing
 
 
-def get_dynamic_font_size(widget_height: int, scale_factor: float = 0.05) -> int:
+def get_dynamic_font_size(widget_height: int, font_percent: float = 0.05, 
+                          user_scaling_factor: float = 1.0) -> int:
     """
     Calculate font size as percentage of widget container height.
+    This makes text resolution-independent - looks the same on 720p and 4K.
     
     Args:
-        widget_height: Height of the widget in pixels
-        scale_factor: 0.0 to 1.0 (e.g., 0.05 = 5% of widget height)
+        widget_height: Height of the widget container in pixels
+        font_percent: Font size as fraction of height (0.05 = 5%)
+        user_scaling_factor: User preference multiplier (default 1.0)
     
     Returns:
-        Font size in pixels, minimum 10px
+        Font size in pixels, minimum 12px for readability
     
-    Example:
-        widget_height=400, scale_factor=0.05 -> 20px font
-        widget_height=800, scale_factor=0.05 -> 40px font (4K scaling!)
+    Examples:
+        # 1080p widget (height=300px)
+        get_dynamic_font_size(300, 0.10) -> 30px
+        
+        # 4K widget (height=600px)  
+        get_dynamic_font_size(600, 0.10) -> 60px
+        
+        # Same visual proportion on both!
     """
-    size = int(widget_height * scale_factor)
-    return max(10, size)  # Minimum 10px for readability
+    size = int(widget_height * font_percent * user_scaling_factor)
+    return max(12, size)  # 12px readability floor
 
 
 def get_auto_contrast_color(background_image: Image.Image) -> Tuple[tuple, tuple, tuple]:
@@ -51,26 +59,25 @@ def get_auto_contrast_color(background_image: Image.Image) -> Tuple[tuple, tuple
     
     Returns:
         (primary_text, secondary_text, shadow_color)
-        - If bright background -> dark text
-        - If dark background -> light text
+        - Bright background (>140 luminance) -> dark text
+        - Mid-tone (90-140) -> white with strong shadow  
+        - Dark (<90) -> white text
     """
-    # Convert to grayscale and calculate average luminance
     gray = background_image.convert('L')
     avg_luminance = np.mean(np.array(gray))
     
-    # Threshold at 128 (middle of 0-255 range)
     if avg_luminance > 140:
-        # BRIGHT background -> use DARK text
+        # BRIGHT background -> DARK text
         primary = (25, 25, 30, 255)
         secondary = (60, 60, 70, 255)
-        shadow = (255, 255, 255, 80)  # Light shadow for dark text
+        shadow = (255, 255, 255, 80)
     elif avg_luminance > 90:
-        # MID-TONE background -> use WHITE with strong shadow
+        # MID-TONE -> WHITE with strong shadow
         primary = (255, 255, 255, 255)
         secondary = (220, 220, 230, 255)
-        shadow = (0, 0, 0, 180)  # Strong shadow for readability
+        shadow = (0, 0, 0, 180)
     else:
-        # DARK background -> use WHITE text
+        # DARK background -> WHITE text
         primary = (255, 255, 255, 255)
         secondary = (200, 200, 210, 255)
         shadow = (0, 0, 0, 120)
@@ -96,14 +103,13 @@ def render_smooth_text(text: str, font_size: int, color: tuple,
     Render text at 4x resolution then downsample for smooth antialiasing.
     Returns transparent RGBA image cropped to text bounds.
     """
-    # Ensure minimum size
-    font_size = max(10, font_size)
+    font_size = max(12, font_size)
     
-    # Load font at 4x size
+    # Render at 4x for smooth AA
     large_size = font_size * SUPERSAMPLE_SCALE
     font = get_font(large_size, bold)
     
-    # Calculate text bounds
+    # Measure text
     temp_img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
     temp_draw = ImageDraw.Draw(temp_img)
     bbox = temp_draw.textbbox((0, 0), text, font=font)
@@ -111,64 +117,77 @@ def render_smooth_text(text: str, font_size: int, color: tuple,
     text_w = bbox[2] - bbox[0] + shadow_offset * SUPERSAMPLE_SCALE * 2
     text_h = bbox[3] - bbox[1] + shadow_offset * SUPERSAMPLE_SCALE * 2
     
-    # Create large canvas
+    # Draw at 4x size
     large_img = Image.new('RGBA', (text_w + 20, text_h + 20), (0, 0, 0, 0))
     draw = ImageDraw.Draw(large_img)
     
-    # Draw position
     x = -bbox[0] + shadow_offset * SUPERSAMPLE_SCALE
     y = -bbox[1] + shadow_offset * SUPERSAMPLE_SCALE
     
-    # Draw shadow at 4x
+    # Shadow
     if shadow_color:
         scaled_offset = shadow_offset * SUPERSAMPLE_SCALE
         for dx, dy in [(-scaled_offset, 0), (scaled_offset, 0), 
                        (0, -scaled_offset), (0, scaled_offset)]:
             draw.text((x + dx, y + dy), text, font=font, fill=shadow_color)
     
-    # Draw main text at 4x
+    # Main text
     draw.text((x, y), text, font=font, fill=color)
     
     # Downsample with LANCZOS
     final_w = max(1, text_w // SUPERSAMPLE_SCALE)
     final_h = max(1, text_h // SUPERSAMPLE_SCALE)
     
-    result = large_img.resize((final_w + 5, final_h + 5), Image.Resampling.LANCZOS)
-    return result
+    return large_img.resize((final_w + 5, final_h + 5), Image.Resampling.LANCZOS)
 
 
-def draw_text(target: Image.Image, pos: tuple, text: str,
-              widget_height: int, scale_factor: float, colors: tuple,
-              bold: bool = True, anchor: str = None):
+def draw_dynamic_text(target: Image.Image, pos: tuple, text: str,
+                      widget_height: int, font_percent: float,
+                      color: tuple, bold: bool = True,
+                      shadow_color: tuple = None,
+                      user_scaling: float = 1.0,
+                      anchor: str = None) -> int:
     """
-    All-in-one text drawing with dynamic sizing and auto-contrast.
+    All-in-one text drawing with automatic responsive sizing.
     
     Args:
         target: Image to draw on
         pos: (x, y) position
         text: Text string
-        widget_height: Height of widget container (for font scaling)
-        scale_factor: Font size as % of widget height (0.05 = 5%)
-        colors: (primary, secondary, shadow) tuple from get_auto_contrast_color
-        bold: Whether to use bold font
-        anchor: 'mt' (middle-top) or 'mm' (middle-middle) or None (left-top)
-    """
-    primary, secondary, shadow = colors
-    font_size = get_dynamic_font_size(widget_height, scale_factor)
+        widget_height: Height of widget container (for scaling)
+        font_percent: Font size as % of height (0.10 = 10%)
+        color: Text color tuple (R, G, B, A)
+        bold: Use bold font
+        shadow_color: Optional shadow color
+        user_scaling: User preference multiplier
+        anchor: 'mt' (middle-top) or 'mm' (middle-middle)
     
-    text_img = render_smooth_text(text, font_size, primary, bold, shadow)
+    Returns:
+        Actual font size used (for layout calculations)
+    
+    Example:
+        # Month header at 10% height
+        draw_dynamic_text(widget, (x, y), "February", widget_height, 
+                          font_percent=0.10, color=text_color)
+        
+        # Day numbers at 5% height
+        draw_dynamic_text(widget, (x, y), "15", widget_height,
+                          font_percent=0.05, color=text_color)
+    """
+    font_size = get_dynamic_font_size(widget_height, font_percent, user_scaling)
+    text_img = render_smooth_text(text, font_size, color, bold, shadow_color)
     
     x, y = pos
     w, h = text_img.size
     
-    if anchor == 'mt':
+    if anchor == 'mt':  # Middle-top
         x = x - w // 2
-    elif anchor == 'mm':
+    elif anchor == 'mm':  # Middle-middle
         x = x - w // 2
         y = y - h // 2
     
     target.paste(text_img, (int(x), int(y)), text_img)
-    return font_size  # Return actual size for layout calculations
+    return font_size  # Return for layout calculations
 
 
 
