@@ -658,19 +658,19 @@ def render_todo_widget(base_image: Image.Image, tasks: List[Dict],
         dot_size = max(4, int(body_font * 0.3))
         draw.ellipse([padding, yp + 3, padding + dot_size * 2, yp + 3 + dot_size * 2], fill=cat_color)
         
-        # Checkbox
-        cb_size = max(8, int(body_font * 0.5))
-        draw.rectangle([padding + dot_size * 2 + 6, yp + 2, 
-                       padding + dot_size * 2 + 6 + cb_size, yp + 2 + cb_size],
-                       outline=text_secondary, width=1)
+        
+        # Checkbox removed as per user request
         
         title = task.get("title", "")
-        max_chars = int((width - padding * 2 - dot_size * 2 - cb_size - 20) / (body_font * 0.5))
+        # Adjusted padding since checkbox (cb_size) is gone
+        # Previous padding: padding + dot_size*2 + cb_size + 12
+        # New padding: padding + dot_size*2 + 12
+        max_chars = int((width - padding * 2 - dot_size * 2 - 20) / (body_font * 0.5))
         if len(title) > max_chars:
             title = title[:max_chars - 2] + ".."
         
         text_img = render_smooth_text(title, body_font, text_color, bold=False)
-        widget.paste(text_img, (padding + dot_size * 2 + cb_size + 12, yp - 1), text_img)
+        widget.paste(text_img, (padding + dot_size * 2 + 12, yp - 1), text_img)
         yp += line_h
     
     if not upcoming:
