@@ -3,11 +3,16 @@ Configuration settings for Wallpaper Calendar App
 Enhanced with multi-widget system
 """
 import os
+import sys
 import json
 from pathlib import Path
 
 # Base paths
-APP_DIR = Path(__file__).parent.absolute()
+# Base paths
+if getattr(sys, 'frozen', False):
+    APP_DIR = Path(sys.executable).parent
+else:
+    APP_DIR = Path(__file__).parent.absolute()
 DATA_DIR = APP_DIR / "data"
 IMAGES_DIR = APP_DIR / "images"
 OUTPUT_DIR = APP_DIR / "output"

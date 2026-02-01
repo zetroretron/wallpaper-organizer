@@ -35,3 +35,9 @@ desktop.ini
 # Temporary files
 *.tmp
 *.temp
+
+# PyInstaller
+dist/
+build/
+*.spec
+*.exe
