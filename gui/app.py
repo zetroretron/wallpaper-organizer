@@ -195,8 +195,9 @@ class WallpaperCalendarApp(ctk.CTk):
         ctk.CTkLabel(font_frame, text="🔤 Font Size", font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=6)
         self.font_scale_label = ctk.CTkLabel(font_frame, text=f"{self.settings.get('font_scale', 100)}%", width=40)
         self.font_scale_label.pack(side="right", padx=5, pady=6)
-        self.font_scale_slider = ctk.CTkSlider(font_frame, from_=50, to=150, number_of_steps=20,
+        self.font_scale_slider = ctk.CTkSlider(font_frame, from_=50, to=200, number_of_steps=30,
                                                 command=self._on_font_scale_change, width=100)
+
         self.font_scale_slider.set(self.settings.get('font_scale', 100))
         self.font_scale_slider.pack(side="right", padx=5, pady=6)
 

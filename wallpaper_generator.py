@@ -21,13 +21,14 @@ from config import (
 # ============================================================================
 
 SUPERSAMPLE_SCALE = 4  # 4x for smooth antialiasing
+FONT_BASE_MULTIPLIER = 2.5  # Base boost for all fonts
 
 
 def get_dynamic_font_size(widget_height: int, font_percent: float = 0.05, 
                           user_scaling_factor: float = 1.0) -> int:
     """
     Calculate font size as percentage of widget container height.
-    This makes text resolution-independent - looks the same on 720p and 4K.
+    Includes a base multiplier to ensure readable text on all resolutions.
     
     Args:
         widget_height: Height of the widget container in pixels
@@ -35,19 +36,12 @@ def get_dynamic_font_size(widget_height: int, font_percent: float = 0.05,
         user_scaling_factor: User preference multiplier (default 1.0)
     
     Returns:
-        Font size in pixels, minimum 12px for readability
-    
-    Examples:
-        # 1080p widget (height=300px)
-        get_dynamic_font_size(300, 0.10) -> 30px
-        
-        # 4K widget (height=600px)  
-        get_dynamic_font_size(600, 0.10) -> 60px
-        
-        # Same visual proportion on both!
+        Font size in pixels, minimum 16px for readability
     """
-    size = int(widget_height * font_percent * user_scaling_factor)
-    return max(12, size)  # 12px readability floor
+    # Apply base multiplier for visibility + user scaling
+    size = int(widget_height * font_percent * FONT_BASE_MULTIPLIER * user_scaling_factor)
+    return max(16, size)  # 16px minimum floor
+
 
 
 def get_auto_contrast_color(background_image: Image.Image) -> Tuple[tuple, tuple, tuple]:
