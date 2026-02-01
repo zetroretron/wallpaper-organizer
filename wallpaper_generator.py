@@ -168,21 +168,52 @@ def calculate_widget_size(image_width: int, image_height: int,
 
 def calculate_font_size(widget_width: int, widget_height: int,
                         font_role: str, dpi_scale: float = 1.0) -> int:
-    """Calculate font size for widget."""
-    base = min(widget_width, widget_height) / 12
+    """
+    Calculate font size as percentage of widget height.
+    This ensures text scales properly from 1080p to 4K.
     
-    multipliers = {
-        'large_date': 4.0, 'title': 1.4, 'header': 1.2,
-        'body': 0.95, 'small': 0.75, 'weekday': 0.85, 'day': 0.9,
+    Font roles and their target height percentages:
+    - large_date: 35% of widget height (big date display)
+    - title: 8% of widget height
+    - header: 7% of widget height
+    - body: 5.5% of widget height
+    - weekday: 5% of widget height
+    - day: 5.5% of widget height
+    - small: 4% of widget height
+    """
+    # Percentage of widget height for each font role
+    height_percentages = {
+        'large_date': 0.30,  # 30% of widget height
+        'title': 0.075,      # 7.5%
+        'header': 0.065,     # 6.5%
+        'body': 0.055,       # 5.5%
+        'weekday': 0.05,     # 5%
+        'day': 0.055,        # 5.5%
+        'small': 0.04,       # 4%
     }
     
-    mult = multipliers.get(font_role, 1.0)
-    size = int(base * mult * dpi_scale)
+    pct = height_percentages.get(font_role, 0.05)
     
-    min_sizes = {'large_date': 28, 'title': 12, 'header': 11, 'body': 10, 'small': 9}
-    max_sizes = {'large_date': 80, 'title': 24, 'header': 20, 'body': 18, 'small': 14}
+    # Calculate size from widget height
+    size = int(widget_height * pct)
     
-    return max(min_sizes.get(font_role, 9), min(size, max_sizes.get(font_role, 30)))
+    # Apply DPI scale for extra sharpness on high-res
+    size = int(size * (0.8 + dpi_scale * 0.2))
+    
+    # Minimum readable sizes (safety floor)
+    min_sizes = {
+        'large_date': 24,
+        'title': 12,
+        'header': 11,
+        'body': 10,
+        'weekday': 9,
+        'day': 10,
+        'small': 9,
+    }
+    
+    # No maximum - let it scale freely for 4K/8K
+    return max(min_sizes.get(font_role, 9), size)
+
 
 
 # ============================================================================
